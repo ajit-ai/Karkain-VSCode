@@ -4,6 +4,21 @@ All notable changes follow Semantic Versioning. The extension stays pre-1.0
 until core language support, diagnostics, build, run, IntelliSense, tests, green
 CI, VSIX packaging, complete docs and understood cross-platform behavior.
 
+## [0.3.0] — 2026-09-24 (Phase 3 language intelligence)
+
+- Hardened `karkain lsp` client: dedicated `Karkain Language Server` output
+  channel (output + trace), 1.1.0 version gate with warning,
+  initialization-failure surfacing instead of silent disablement.
+- New pure `lsp.ts`: capability negotiation, server version gate, LSP 3.17
+  SymbolKind names, all unit-tested.
+- `fixtures/lsp/smoke.kark` with position-stable symbols; manual
+  `scripts/lsp-smoke.mjs` gate (`npm run test:lsp-smoke -- <karkain-bin>`)
+  asserting handshake, push diagnostics, completion, hover, definition,
+  document symbols and semantic tokens — 17/17 PASS against source-built 1.1.0.
+- Inspection doc records the live-verified capability matrix; rename,
+  references, code actions and workspace symbols confirmed absent server-side
+  and not faked.
+
 ## [0.2.0] — 2026-09-24 (Phase 2 language foundation)
 
 - TextMate grammar covers the full SPEC §1.2 surface: core control keywords,

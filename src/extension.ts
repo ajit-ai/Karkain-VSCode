@@ -1,16 +1,18 @@
 // Karkain for Visual Studio Code — extension entry point.
 //
-// Phase 1 foundation: activation, Karkain toolchain probing, shell-out
-// commands (check / build / run / format) wired to the real `karkain` CLI,
-// Problems-panel diagnostics from `karkain check --format=json` (Karkain
-// >= 1.1.0, with an honest fallback for older toolchains), and a guarded
-// `karkain lsp` language client. The extension never re-implements compiler
-// work: every semantic result comes from the toolchain.
+// Activation, Karkain toolchain probing, shell-out commands (check / build /
+// run / format) wired to the real `karkain` CLI, Problems-panel diagnostics
+// from `karkain check --format=json` (Karkain >= 1.1.0, with an honest fallback
+// for older toolchains), and a hardened `karkain lsp` language client with a
+// dedicated output channel, version gate and failure surfacing. The extension
+// never re-implements compiler work: every semantic result comes from the
+// toolchain.
 import * as vscode from 'vscode';
 import { execFile, spawn } from 'child_process';
 import {
   buildArgs,
   checkArgs,
+  compareVersions,
   configArgs,
   fmtArgs,
   isKarkFile,
@@ -21,6 +23,7 @@ import {
   versionArgs,
 } from './toolchain';
 import { KarkainDiagnostic, KarkainSeverity, tryParseCheckJson } from './diagnostics';
+import { KARKAIN_LANGUAGE_SERVER_ID, MIN_LANGUAGE_SERVER_VERSION } from './lsp';
 import { getCompilerPath, getFormatOnSave } from './config';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -29,6 +32,7 @@ type LanguageClientType = any;
 let client: LanguageClientType | null = null;
 let detectedVersion: string | undefined;
 let channel: vscode.OutputChannel | undefined;
+let lspChannel: vscode.OutputChannel | undefined;
 let problems: vscode.DiagnosticCollection | undefined;
 
 function log(msg: string): void {
@@ -56,9 +60,15 @@ async function probeToolchain(): Promise<void> {
     const parsed = parseVersionString(r.stdout);
     if (parsed) {
       detectedVersion = parsed.version;
+      const lspOk = compareVersions(parsed.version, MIN_LANGUAGE_SERVER_VERSION) >= 0;
       log(
-        `Karkain toolchain: ${parsed.raw} (structured diagnostics: ${supportsStructuredDiagnostics(parsed.version) ? 'yes' : 'requires >= 1.1.0'})`,
+        `Karkain toolchain: ${parsed.raw} (structured diagnostics: ${supportsStructuredDiagnostics(parsed.version) ? 'yes' : 'requires >= 1.1.0'}; language server: ${lspOk ? 'supported' : `expects >= ${MIN_LANGUAGE_SERVER_VERSION}`})`,
       );
+      if (!lspOk) {
+        void vscode.window.showWarningMessage(
+          `Karkain: language intelligence is verified against ${MIN_LANGUAGE_SERVER_VERSION}+ (detected ${parsed.version}).`,
+        );
+      }
     } else if (r.code === 0) {
       log(`Karkain toolchain responded with unrecognized version output: ${r.stdout.trim()}`);
     } else {
@@ -84,8 +94,24 @@ function startLanguageClient(context: vscode.ExtensionContext): void {
     return;
   }
   const serverOptions = { command: getCompilerPath(), args: ['lsp'], options: {} };
-  const clientOptions = { documentSelector: [{ scheme: 'file', language: 'karkain' }] };
-  client = new lc.LanguageClient('karkain-lsp', 'Karkain Language Server', serverOptions, clientOptions);
+  const clientOptions = {
+    documentSelector: [{ scheme: 'file', language: 'karkain' }],
+    outputChannel: lspChannel,
+    traceOutputChannel: lspChannel,
+    initializationFailedHandler: (error: Error) => {
+      log(`Language server initialization failed: ${error.message}`);
+      void vscode.window.showErrorMessage(
+        'Karkain: the language server failed to start. See the Karkain Language Server output channel.',
+      );
+      return false;
+    },
+  };
+  client = new lc.LanguageClient(
+    KARKAIN_LANGUAGE_SERVER_ID,
+    'Karkain Language Server',
+    serverOptions,
+    clientOptions,
+  );
   context.subscriptions.push(client.start());
   log('Karkain language client started (`karkain lsp` over stdio).');
 }
@@ -259,9 +285,11 @@ function reportCheck(
 export function activate(context: vscode.ExtensionContext): void {
   channel = vscode.window.createOutputChannel('Karkain');
   context.subscriptions.push(channel);
+  lspChannel = vscode.window.createOutputChannel('Karkain Language Server');
+  context.subscriptions.push(lspChannel);
   problems = vscode.languages.createDiagnosticCollection('karkain');
   context.subscriptions.push(problems);
-  log('Karkain for Visual Studio Code 0.2.0 activated.');
+  log('Karkain for Visual Studio Code 0.3.0 activated.');
   void probeToolchain();
   startLanguageClient(context);
 

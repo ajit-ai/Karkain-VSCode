@@ -21,7 +21,7 @@ formatter, test runner and language server live in the Karkain repository.
 ```sh
 npm install
 npm run package
-code --install-extension karkain-0.2.0.vsix
+code --install-extension karkain-0.3.0.vsix
 ```
 
 ## Commands
@@ -34,11 +34,11 @@ code --install-extension karkain-0.2.0.vsix
 `karkain.compilerPath` (default `karkain`) · `karkain.debuggerPath` (default
 `gdb`) · `karkain.formatOnSave` (default `false`).
 
-## Known limitations (Phase 2)
+## Known limitations (Phase 3)
 
 - `karkain fmt` whole-document formatting requires Karkain 1.1.0+.
-- Semantic highlighting (references, member types) arrives with the LSP semantic
-  tokens work in Phase 3; the TextMate grammar is lexical.
+- Semantic features follow the server: rename, references, code actions and
+  workspace symbols are absent from `karkain lsp` and are not faked.
 - No test-explorer, debug-adapter or target-picker UI yet (Phases 5–7);
   debugging uses `karkain build -g` + GDB/`cppdbg`.
 - Desktop VS Code only; `vscode.dev` is unsupported (native toolchain).
@@ -52,6 +52,8 @@ npm run lint
 npm run format:check
 npm run test:unit
 npm run package
+# manual gate, needs a 1.1.0+ binary (not in CI):
+npm run test:lsp-smoke -- /path/to/karkain
 ```
 
 See `docs/KARKAIN-INSPECTION.md` (toolchain truth), `docs/INTEGRATION-BOUNDARY.md`

@@ -1,0 +1,13 @@
+// LSP smoke fixture: small valid program with stable symbol positions for
+// hover/definition/outline verification (see docs/KARKAIN-INSPECTION.md §4).
+// `add` is declared on 0-based line 3 and used on 0-based line 11.
+func add(a, b) {
+    return a + b
+}
+
+type Counter struct { value int }
+
+func main() {
+    let c = Counter{value: 1}
+    print(add(c.value, 41))
+}

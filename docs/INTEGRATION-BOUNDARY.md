@@ -21,7 +21,9 @@ real toolchain.
   runs `fmt`, then reloads disk content as the edit; dirty-buffer formatting
   without save is refused rather than misapplied.
 - `karkain lsp` stdio client (completion/hover/definition/symbols/semantic
-  tokens/diagnostics per pkg/lsp ServerCapabilities).
+  tokens/diagnostics per pkg/lsp ServerCapabilities), verified live 17/17 via
+  `scripts/lsp-smoke.mjs`, with a dedicated output channel, 1.1.0 version gate
+  and init-failure surfacing.
 - Terminal build/run, `build -g` + `cppdbg`/GDB debug template (no custom UI).
 - Toolchain discovery via PATH + `karkain.compilerPath`, version probe,
   `target`/`config` environment reporting.

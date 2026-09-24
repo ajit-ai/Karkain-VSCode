@@ -2,7 +2,7 @@
   "name": "karkain",
   "displayName": "Karkain for Visual Studio Code",
   "description": "Development environment for the Karkain programming language (.kark): syntax highlighting, Karkain CLI integration (check, build, run, format) and Karkain Language Server (karkain lsp) intelligence. Requires the Karkain 1.1.0 toolchain.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "karkain",
   "license": "MIT",
   "repository": {
@@ -124,6 +124,7 @@
     "lint": "eslint src --ext .ts",
     "format:check": "prettier --check .",
     "test:unit": "npm run compile && mocha",
+    "test:lsp-smoke": "node scripts/lsp-smoke.mjs",
     "package": "vsce package"
   },
   "dependencies": {

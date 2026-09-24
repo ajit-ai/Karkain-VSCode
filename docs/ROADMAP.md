@@ -1,6 +1,6 @@
 # Roadmap (internal, numbered)
 
-Status: Phases 1–2 complete. No phase is skipped; each lands with tests,
+Status: Phases 1–3 complete. No phase is skipped; each lands with tests,
 validation runs, docs updates and an honest limitation report.
 
 - [x] **Phase 1 — Repository Foundation & Architecture**: Karkain inspection
@@ -12,10 +12,12 @@ validation runs, docs updates and an honest limitation report.
       definitions, escapes, `& @ . ?` operators), 12 snippets, word pattern,
       indentation and `//` onEnter rules, `fixtures/syntax/showcase.kark`,
       grammar/snippet/config unit tests.
-- [ ] **Phase 3 — Language Intelligence**: harden the `karkain lsp` client
-      (reconnect, version gate, trace channel), Problems-panel diagnostics from both
-      push-diagnostics and `check`, hover/definition/completion smoke fixtures,
-      document-symbol outline verification.
+- [x] **Phase 3 — Language Intelligence**: hardened `karkain lsp` client
+      (dedicated output channel, 1.1.0 version gate, init-failure surfacing),
+      capability-negotiation + SymbolKind helpers with unit tests,
+      `fixtures/lsp/smoke.kark`, manual `scripts/lsp-smoke.mjs` gate (17/17
+      PASS live: handshake, push diagnostics, completion, hover, definition,
+      symbols, semantic tokens).
 - [ ] **Phase 4 — Build / Run / Toolchain**: `karkain.toml` project-root
       detection, Tasks integration (build/clean/workspace), PATH + multi-install
       selection, `showEnvironment` expansion, terminal/output refinement.

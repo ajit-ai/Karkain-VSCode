@@ -64,6 +64,13 @@ net http db` (both engines byte-identical).
   push diagnostics. Server version 1.0.0.
 - NOT provided: rename, references, code actions, code lens, inlay hints, call
   hierarchy, workspace symbols (absent from ServerCapabilities).
+- Verified live (source-built 1.1.0, `scripts/lsp-smoke.mjs`, 17/17 PASS):
+  handshake reports `serverInfo {karkain-lsp, 1.1.0}`, full sync + save
+  `includeText`, completion triggers `.`/`:`, hover markdown with range
+  (keyword + symbol), definition usage→declaration, documentSymbol with
+  Function/Struct+Field children/Enum+EnumMember, semanticTokens delta data,
+  full-document formatting edit, `publishDiagnostics` `[]` on clean open and a
+  ranged `severity:1, source:karkain` error on `let = 42`.
 
 ## 5. Diagnostics
 
