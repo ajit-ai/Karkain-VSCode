@@ -2,9 +2,10 @@
   "name": "karkain",
   "displayName": "Karkain for Visual Studio Code",
   "description": "Development environment for the Karkain programming language (.kark): syntax highlighting, Karkain CLI integration (check, build, run, format) and Karkain Language Server (karkain lsp) intelligence. Requires the Karkain 1.1.0 toolchain.",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "publisher": "karkain",
   "license": "MIT",
+  "icon": "images/karkain-icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/ajit-ai/Karkain-VSCode.git"

@@ -4,6 +4,18 @@ All notable changes follow Semantic Versioning. The extension stays pre-1.0
 until core language support, diagnostics, build, run, IntelliSense, tests, green
 CI, VSIX packaging, complete docs and understood cross-platform behavior.
 
+## [0.9.0] — 2026-09-24 (Phase 9 release readiness)
+
+- 128×128 extension icon (`images/karkain-icon.png`, generated and
+  pixel-verified) wired into the manifest and the VSIX.
+- Tag-gated release automation (`.github/workflows/release.yml`): tag/version
+  match check, full validation, VSIX build, GitHub Release with the VSIX asset
+  and CHANGELOG notes. Marketplace publication stays a manual owner step.
+- `docs/RELEASE.md`: versioning policy, release runbook, verification
+  checklist, Marketplace prerequisites with the `karkain` publisher placeholder
+  called out as pending owner decision.
+- Activation banner now reads the manifest version at runtime (no sync drift).
+
 ## [0.8.0] — 2026-09-24 (Phase 8 hardening)
 
 - Security documented (`docs/SECURITY.md`) and audited: argv-only spawning, no

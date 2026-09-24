@@ -714,7 +714,7 @@ export function activate(context: vscode.ExtensionContext): void {
     true,
   );
   context.subscriptions.push(testRunProfile);
-  log('Karkain for Visual Studio Code 0.8.0 activated.');
+  log(`Karkain for Visual Studio Code ${context.extension.packageJSON.version as string} activated.`);
   void probeToolchain();
   startLanguageClient(context);
   void refreshAllTests();

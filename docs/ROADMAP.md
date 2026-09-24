@@ -1,6 +1,6 @@
 # Roadmap (internal, numbered)
 
-Status: Phases 1–8 complete. No phase is skipped; each lands with tests,
+Status: Phases 1–9 complete. No phase is skipped; each lands with tests,
 validation runs, docs updates and an honest limitation report.
 
 - [x] **Phase 1 — Repository Foundation & Architecture**: Karkain inspection
@@ -54,5 +54,8 @@ validation runs, docs updates and an honest limitation report.
       `scripts/toolchain-smoke.mjs` gate (15/15 PASS live) beside the LSP
       smoke gate. No bundler: the vsce size hint is documented, startup cost
       is negligible at this size, and the toolchain call stays dependency-free.
-- [ ] **Phase 9 — Packaging / Release**: `.vsix` verification matrix, icon,
-      publisher decision, Marketplace metadata, release automation, install docs.
+- [x] **Phase 9 — Packaging / Release**: 128×128 icon with manifest wiring,
+      tag-gated release automation (version check, full validation, VSIX asset
+      on GitHub Releases — never Marketplace auto-publish), `docs/RELEASE.md`
+      with versioning policy and the manual Marketplace checklist, runtime
+      version banner (no hardcoded drift).

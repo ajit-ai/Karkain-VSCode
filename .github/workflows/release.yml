@@ -1,0 +1,45 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # Tag-gated release: validates everything, packages the VSIX and attaches
+    # it to a GitHub Release. Never publishes to the Marketplace (manual,
+    # owner-only step documented in docs/RELEASE.md).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: npm
+      - name: tag matches package.json version
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          test "$tag" = "$pkg" || { echo "tag v$tag does not match package.json $pkg"; exit 1; }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run test:unit
+      - run: npx --yes @vscode/vsce package --no-yarn
+      - name: release notes from CHANGELOG
+        shell: bash
+        run: |
+          pkg="$(node -p "require('./package.json').version")"
+          awk "/^## \[$pkg\]/ {flag=1; next} /^## \[/ {flag=0} flag" CHANGELOG.md > release-notes.md
+          test -s release-notes.md || { echo "no CHANGELOG entry for $pkg"; exit 1; }
+          cat release-notes.md
+      - name: create GitHub release with VSIX
+        shell: bash
+        run: gh release create "$GITHUB_REF_NAME" karkain-*.vsix --title "$GITHUB_REF_NAME" --notes-file release-notes.md
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

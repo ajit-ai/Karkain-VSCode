@@ -17,5 +17,6 @@
 .gitignore text eol=lf
 .vscodeignore text eol=lf
 LICENSE text eol=lf
+*.png binary
 *.vsix binary
 *.exe binary

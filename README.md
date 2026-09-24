@@ -21,8 +21,11 @@ formatter, test runner and language server live in the Karkain repository.
 ```sh
 npm install
 npm run package
-code --install-extension karkain-0.7.0.vsix
+code --install-extension karkain-0.9.0.vsix
 ```
+
+Release builds are attached to GitHub Releases (see `docs/RELEASE.md`); the
+Marketplace step is a separate, manual owner decision.
 
 ## Commands
 
@@ -67,7 +70,7 @@ and `templates/tasks.json` to your workspace `.vscode/` and press F5.
 `gdb`) · `karkain.formatOnSave` (default `false`) · `karkain.target` (default
 empty = host default).
 
-## Known limitations (Phase 8)
+## Known limitations (Phase 9)
 
 - `karkain fmt` whole-document formatting requires Karkain 1.1.0+.
 - Semantic features follow the server: rename, references, code actions and
