@@ -2,7 +2,7 @@
   "name": "karkain",
   "displayName": "Karkain for Visual Studio Code",
   "description": "Development environment for the Karkain programming language (.kark): syntax highlighting, Karkain CLI integration (check, build, run, format) and Karkain Language Server (karkain lsp) intelligence. Requires the Karkain 1.1.0 toolchain.",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "publisher": "karkain",
   "license": "MIT",
   "repository": {
@@ -42,6 +42,7 @@
     "onCommand:karkain.clean",
     "onCommand:karkain.test",
     "onCommand:karkain.debug",
+    "onCommand:karkain.selectTarget",
     "onCommand:karkain.selectToolchain",
     "onCommand:karkain.formatDocument",
     "onCommand:karkain.showEnvironment",
@@ -97,6 +98,10 @@
       {
         "command": "karkain.debug",
         "title": "Karkain: Debug File (gdb)"
+      },
+      {
+        "command": "karkain.selectTarget",
+        "title": "Karkain: Select Target"
       },
       {
         "command": "karkain.selectToolchain",
@@ -156,6 +161,11 @@
           "type": "boolean",
           "default": false,
           "description": "Format .kark documents on save using `karkain fmt`. Requires Karkain 1.1.0 or newer."
+        },
+        "karkain.target": {
+          "type": "string",
+          "default": "",
+          "description": "Target triple passed as --target to build/run (empty means the host default). See `karkain target` for supported values."
         }
       }
     }

@@ -170,3 +170,24 @@ CLI contracts verified live on 1.1.0:
   (`cannot locate src/compiler …`); `check` works from any CWD.
 - Never run single-file probes in a directory with sibling `.kark` files:
   the CLI assembles siblings into one unit and errors cross-attribute.
+
+## 10. Targets (verified live on 1.1.0, host x86_64-windows)
+
+`karkain target` reports `Host:` + `Supported targets:` (c23, native,
+native-link, wasm32-wasi, x86_64/aarch64-windows, x86_64/aarch64/riscv64-linux,
+x86_64/aarch64-macos, each with a description) + `Default: native` + a
+`Compute targets` catalog with CLI-reported maturities: `cpu`/`simd`
+implemented, `gpu-experimental`/`npu-experimental`/`wasm32-wasi` experimental,
+`quantum-experimental` research. `karkain target <name>` renders a detail view
+(Family/Maturity/Host triple/Memory model/Execution model/Description/
+Capabilities).
+
+Verified behaviors:
+
+- `build --target wasm32-wasi -o hello.wasm` → exit 0, runnable-module file.
+- `run --target <foreign>` is refused with a build-only hint (exit 6).
+- Unknown targets fail (`unsupported target …`, usage-class exit); foreign
+  builds without a cross-linker fail with the exact searched list (exit 6).
+- GPU/NPU/quantum have no executable backend: compile-only model surface at
+  best, research spec at worst. The extension exposes exactly what the matrix
+  reports, with maturities quoted verbatim.

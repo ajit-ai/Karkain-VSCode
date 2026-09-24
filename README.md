@@ -21,21 +21,29 @@ formatter, test runner and language server live in the Karkain repository.
 ```sh
 npm install
 npm run package
-code --install-extension karkain-0.6.0.vsix
+code --install-extension karkain-0.7.0.vsix
 ```
 
 ## Commands
 
 `Karkain: Check File` · `Build File` · `Run File` · `Clean` · `Test` ·
-`Format Document` · `Show Environment` · `Select Toolchain` ·
-`Restart Language Server`
+`Debug File` · `Format Document` · `Show Environment` · `Select Toolchain` ·
+`Select Target` · `Restart Language Server`
+
+## Targets
+
+`Karkain: Select Target` lists the matrix reported by `karkain target`
+(platform triples plus compute targets with their real maturity labels).
+The status bar shows the selection; build/run append `--target`. Debugging
+always uses a host build. Foreign `run` is refused by the toolchain, and
+missing cross-linkers fail loudly — both surface in the terminal.
 
 ## Testing
 
 `Testing` view lists `*_test.kark` files and their `test_*` functions
 (discovered via document symbols). Run files or individual tests; results,
 assertion output and the totals line appear under each test and in the
-`Karkain Test` channel. Debug-test arrives with Phase 6.
+`Karkain Test` channel. Test files cannot be debugged (they do not link).
 
 ## Tasks
 
@@ -58,13 +66,13 @@ and `templates/tasks.json` to your workspace `.vscode/` and press F5.
 `karkain.compilerPath` (default `karkain`) · `karkain.debuggerPath` (default
 `gdb`) · `karkain.formatOnSave` (default `false`).
 
-## Known limitations (Phase 6)
+## Known limitations (Phase 7)
 
 - `karkain fmt` whole-document formatting requires Karkain 1.1.0+.
 - Semantic features follow the server: rename, references, code actions and
   workspace symbols are absent from `karkain lsp` and are not faked.
-- No target-picker UI yet (Phase 7); no debug-test profile (test files do not
-  link).
+- GPU/NPU/Quantum targets are model-only or research-grade per the toolchain;
+  only `cpu`/`simd`/`wasm32-wasi`/native triples execute today.
 - Desktop VS Code only; `vscode.dev` is unsupported (native toolchain).
 
 ## Development

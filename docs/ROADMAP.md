@@ -1,6 +1,6 @@
 # Roadmap (internal, numbered)
 
-Status: Phases 1–6 complete. No phase is skipped; each lands with tests,
+Status: Phases 1–7 complete. No phase is skipped; each lands with tests,
 validation runs, docs updates and an honest limitation report.
 
 - [x] **Phase 1 — Repository Foundation & Architecture**: Karkain inspection
@@ -40,8 +40,12 @@ validation runs, docs updates and an honest limitation report.
       stepping, variables, call stack, watch and evaluate come from GDB itself.
       Debug-test profile resolved as unsupported: test-only files have no
       `main` and fail to link (`undefined reference to WinMain`, exit 6).
-- [ ] **Phase 7 — Target / Heterogeneous**: `karkain target` matrix picker,
-      `--target`-aware build/diagnostics, experimental targets labeled as such.
+- [x] **Phase 7 — Target / Heterogeneous**: `Karkain: Select Target` over the
+      real `karkain target` matrix (platform triples + compute targets with
+      CLI-reported maturities, never invented), `karkain.target` setting wired
+      into build/run, status-bar indicator, host-only debugging documented.
+      Verified: wasm32-wasi builds a runnable-module file, foreign `run` is
+      refused (exit 6), unknown targets and missing cross-linkers fail loudly.
 - [ ] **Phase 8 — Production Hardening**: security review, cancellation,
       cross-platform (win/linux/mac) validation, performance, UX refinement.
 - [ ] **Phase 9 — Packaging / Release**: `.vsix` verification matrix, icon,

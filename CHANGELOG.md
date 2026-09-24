@@ -4,6 +4,19 @@ All notable changes follow Semantic Versioning. The extension stays pre-1.0
 until core language support, diagnostics, build, run, IntelliSense, tests, green
 CI, VSIX packaging, complete docs and understood cross-platform behavior.
 
+## [0.7.0] — 2026-09-24 (Phase 7 targets)
+
+- `Karkain: Select Target` backed by the live `karkain target` matrix:
+  platform triples plus compute targets (`cpu`/`simd` implemented,
+  `gpu`/`npu` experimental, `quantum` research, wasm experimental) with the
+  CLI's own maturity labels and per-target detail views.
+- `karkain.target` setting appended as `--target` to build/run (empty = host
+  default, byte-identical argv); status-bar indicator with click-to-select;
+  debugging stays host-only by design and says so.
+- Verified live: `build --target wasm32-wasi` emits a module; foreign `run`
+  refused (exit 6); unknown targets and missing cross-linkers fail with
+  actionable messages (exit 6/2), surfaced never swallowed.
+
 ## [0.6.0] — 2026-09-24 (Phase 6 debugging)
 
 - `Karkain: Debug File (gdb)`: verified `karkain build -g` of the active file,

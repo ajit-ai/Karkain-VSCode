@@ -27,6 +27,9 @@ real toolchain.
 - Terminal build/run, `build -g` + `cppdbg`/GDB debug template (no custom UI).
 - Toolchain discovery via PATH + `karkain.compilerPath`, version probe,
   `target`/`config` environment reporting.
+- Target selection over the live `karkain target` matrix (triples + compute
+  targets with CLI-reported maturities), `karkain.target` wired into build/run,
+  status-bar indicator; debugging stays host-only by design.
 
 ## Available through an existing interface (wired later, no Karkain change needed)
 

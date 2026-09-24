@@ -15,7 +15,8 @@ src/
   tasks.ts        pure: task argv/label/group builders
   testing.ts      pure: test discovery + PASS/FAIL/summary parsing
   debug.ts        pure: -g build argv, program path, cppdbg launch/attach configs
-  config.ts       settings access (compilerPath/debuggerPath/formatOnSave)
+  targets.ts      pure: target-matrix/detail parsing, --target argv insertion
+  config.ts       settings access (compilerPath/debuggerPath/formatOnSave/target)
   test/unit/      mocha unit tests for the pure modules
 fixtures/         real .kark programs (hello-world, diagnostics negatives,
                   syntax showcase, lsp smoke)

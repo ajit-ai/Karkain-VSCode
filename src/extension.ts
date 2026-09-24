@@ -39,8 +39,9 @@ import {
   testNamesFromSymbols,
   testNamesFromText,
 } from './testing';
-import { getCompilerPath, getDebuggerPath, getFormatOnSave } from './config';
+import { getCompilerPath, getDebuggerPath, getFormatOnSave, getTarget } from './config';
 import { cppdbgLaunchConfig, debugBinaryPath, debugBuildArgs } from './debug';
+import { applyTarget, parseTargetOutput } from './targets';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type LanguageClientType = any;
@@ -54,6 +55,7 @@ let problems: vscode.DiagnosticCollection | undefined;
 let testController: vscode.TestController | undefined;
 let testRunProfile: vscode.TestRunProfile | undefined;
 let debugChannel: vscode.OutputChannel | undefined;
+let targetStatus: vscode.StatusBarItem | undefined;
 // `${uri}#${testName}` -> declaration range for failure navigation.
 const testRanges = new Map<string, vscode.Range>();
 
@@ -208,6 +210,16 @@ function discoverToolchains(): string[] {
     return [configured, ...found];
   }
   return found;
+}
+
+function updateTargetStatus(): void {
+  const t = getTarget();
+  if (targetStatus) {
+    targetStatus.text = `Karkain: ${t === '' ? 'native' : t}`;
+    targetStatus.tooltip = 'Karkain target (click to select)';
+    targetStatus.command = 'karkain.selectTarget';
+    targetStatus.show();
+  }
 }
 
 function resolvedCompilerPath(): string {
@@ -637,6 +649,9 @@ async function runDebug(): Promise<void> {
   const folder = vscode.workspace.getWorkspaceFolder(doc.uri);
   const cwd = effectiveCwd(file);
   debugChannel?.show(true);
+  if (getTarget() !== '') {
+    debugChannel?.appendLine(`note: karkain.target is '${getTarget()}'; debugging always uses a host build`);
+  }
   debugChannel?.appendLine(`$ karkain build -g ${file} -o ${program}`);
   const build = await new Promise<{ code: number | null; out: string }>((resolve) => {
     const proc = spawn(getCompilerPath(), debugBuildArgs(file, program), { cwd });
@@ -684,6 +699,9 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(testChannel);
   debugChannel = vscode.window.createOutputChannel('Karkain Debug');
   context.subscriptions.push(debugChannel);
+  targetStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+  context.subscriptions.push(targetStatus);
+  updateTargetStatus();
   testController = vscode.tests.createTestController('karkainTests', 'Karkain Tests');
   context.subscriptions.push(testController);
   testRunProfile = testController.createRunProfile(
@@ -693,7 +711,7 @@ export function activate(context: vscode.ExtensionContext): void {
     true,
   );
   context.subscriptions.push(testRunProfile);
-  log('Karkain for Visual Studio Code 0.6.0 activated.');
+  log('Karkain for Visual Studio Code 0.7.0 activated.');
   void probeToolchain();
   startLanguageClient(context);
   void refreshAllTests();
@@ -708,13 +726,21 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('karkain.build', () => {
       const doc = activeKarkainDocument();
       if (doc) {
-        runInTerminal('karkain build', buildArgs(doc.uri.fsPath), effectiveCwd(doc.uri.fsPath));
+        runInTerminal(
+          'karkain build',
+          applyTarget(buildArgs(doc.uri.fsPath), getTarget()),
+          effectiveCwd(doc.uri.fsPath),
+        );
       }
     }),
     vscode.commands.registerCommand('karkain.run', () => {
       const doc = activeKarkainDocument();
       if (doc) {
-        runInTerminal('karkain run', runArgs(doc.uri.fsPath), effectiveCwd(doc.uri.fsPath));
+        runInTerminal(
+          'karkain run',
+          applyTarget(runArgs(doc.uri.fsPath), getTarget()),
+          effectiveCwd(doc.uri.fsPath),
+        );
       }
     }),
     vscode.commands.registerCommand('karkain.clean', () => {
@@ -786,9 +812,56 @@ export function activate(context: vscode.ExtensionContext): void {
         void vscode.commands.executeCommand('editor.action.formatDocument');
       }
     }),
+    vscode.commands.registerCommand('karkain.selectTarget', async () => {
+      const peer = await execTool(targetArgs(), vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
+      if (peer.code !== 0) {
+        log(`karkain target failed (exit ${peer.code}):\n${peer.stderr || peer.stdout}`);
+        void vscode.window.showErrorMessage(
+          'Karkain: could not list targets. See the Karkain output channel.',
+        );
+        return;
+      }
+      const matrix = parseTargetOutput(peer.stdout);
+      if (matrix.targets.length === 0 && matrix.compute.length === 0) {
+        void vscode.window.showWarningMessage('Karkain: the toolchain reported no targets.');
+        return;
+      }
+      interface TargetPick extends vscode.QuickPickItem {
+        value: string;
+      }
+      const picks: TargetPick[] = [
+        { label: '$(clear) Host default (native)', description: 'build and run for this machine', value: '' },
+        ...matrix.targets.map((t) => ({ label: t.name, description: t.description, value: t.name })),
+      ];
+      if (matrix.compute.length > 0) {
+        picks.push({ label: 'Compute targets', kind: vscode.QuickPickItemKind.Separator, value: '' });
+        for (const c of matrix.compute) {
+          picks.push({ label: c.name, description: `${c.maturity} — ${c.description}`, value: c.name });
+        }
+      }
+      const pick = await vscode.window.showQuickPick(picks, { placeHolder: 'Select the Karkain target' });
+      if (!pick || pick.kind === vscode.QuickPickItemKind.Separator) {
+        return;
+      }
+      const folder = vscode.workspace.workspaceFolders?.[0];
+      await vscode.workspace
+        .getConfiguration('karkain')
+        .update(
+          'target',
+          pick.value,
+          folder ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global,
+        );
+      log(`Karkain target selected: ${pick.value === '' ? '(host default)' : pick.value}`);
+      updateTargetStatus();
+      vscode.window.setStatusBarMessage(
+        `Karkain: target set to ${pick.value === '' ? 'host default' : pick.value}`,
+        5000,
+      );
+    }),
     vscode.commands.registerCommand('karkain.showEnvironment', async () => {
       channel?.show(true);
       log(`executable: ${getCompilerPath()} (resolved: ${resolvedCompilerPath()})`);
+      log(`selected target: ${getTarget() === '' ? '(host default)' : getTarget()}`);
       const active = vscode.window.activeTextEditor?.document;
       log(`project root: ${active ? (findProjectRoot(active.uri.fsPath) ?? '(none)') : '(no active file)'}`);
       log(`toolchains on PATH: ${discoverToolchains().join(', ') || '(none)'}`);
@@ -918,6 +991,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('karkain')) {
         void probeToolchain();
+        updateTargetStatus();
       }
     }),
     vscode.workspace.onDidSaveTextDocument((doc) => {
