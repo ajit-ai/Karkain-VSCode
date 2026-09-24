@@ -20,7 +20,8 @@ src/
   test/unit/      mocha unit tests for the pure modules
 fixtures/         real .kark programs (hello-world, diagnostics negatives,
                   syntax showcase, lsp smoke)
-scripts/          manual gates requiring a real toolchain (lsp-smoke, not in CI)
+scripts/          manual gates requiring a real toolchain (lsp-smoke,
+                  toolchain-smoke; not in CI)
 docs/             inspection, boundary, roadmap, architecture
 ```
 

@@ -64,9 +64,10 @@ and `templates/tasks.json` to your workspace `.vscode/` and press F5.
 ## Settings
 
 `karkain.compilerPath` (default `karkain`) · `karkain.debuggerPath` (default
-`gdb`) · `karkain.formatOnSave` (default `false`).
+`gdb`) · `karkain.formatOnSave` (default `false`) · `karkain.target` (default
+empty = host default).
 
-## Known limitations (Phase 7)
+## Known limitations (Phase 8)
 
 - `karkain fmt` whole-document formatting requires Karkain 1.1.0+.
 - Semantic features follow the server: rename, references, code actions and
@@ -84,9 +85,19 @@ npm run lint
 npm run format:check
 npm run test:unit
 npm run package
-# manual gate, needs a 1.1.0+ binary (not in CI):
+# manual gates, need a 1.1.0+ binary (not in CI):
 npm run test:lsp-smoke -- /path/to/karkain
+npm run test:toolchain-smoke -- /path/to/karkain
 ```
+
+## Troubleshooting
+
+- `cannot locate src/compiler` (exit 6): a source-built `karkain` needs its
+  compiler tree — set `KARKAIN_KCC` to the Karkain source directory or work
+  inside it. Release-installed toolchains do not need this.
+- `Karkain: could not start the karkain executable`: set
+  `karkain.compilerPath` to the binary or put it on `PATH`, then
+  `Karkain: Show Environment` to verify.
 
 See `docs/KARKAIN-INSPECTION.md` (toolchain truth), `docs/INTEGRATION-BOUNDARY.md`
 (capability claims), `docs/ARCHITECTURE.md` and `docs/ROADMAP.md`.

@@ -72,18 +72,33 @@ export function splitPathEnv(raw: string | undefined, platform: NodeJS.Platform)
     .filter((s) => s.length > 0);
 }
 
+// Double-quote a terminal argument (same convention as the in-tree prototype).
+// Used only for user-visible terminal lines; process spawning itself always
+// uses argv vectors. Trailing backslashes are doubled so they cannot escape
+// the closing quote on Windows shells.
+export function quoteTerminalArg(a: string): string {
+  return '"' + a.replace(/(\\+)$/, '$1$1').replace(/"/g, '\\"') + '"';
+}
+
+// Dedupe key: case-insensitive only where the filesystem is (win32/darwin),
+// so distinct-case paths on Linux never collapse into one entry.
+function dedupeKey(p: string, platform: NodeJS.Platform): string {
+  return platform === 'win32' || platform === 'darwin' ? p.toLowerCase() : p;
+}
+
 // First candidate found on PATH. `exists` is injected (fs.existsSync in the
 // extension, a stub in tests). Returns null when nothing resolves.
 export function resolveOnPath(
   dirs: string[],
   names: string[],
   exists: (p: string) => boolean,
+  platform: NodeJS.Platform = process.platform,
 ): string | null {
   const seen = new Set<string>();
   for (const dir of dirs) {
     for (const name of names) {
       const full = dir.endsWith('/') || dir.endsWith('\\') ? dir + name : `${dir}/${name}`;
-      const key = full.toLowerCase();
+      const key = dedupeKey(full, platform);
       if (seen.has(key)) {
         continue;
       }
@@ -101,13 +116,18 @@ export function resolveOnPath(
 }
 
 // Lists every candidate found (for the toolchain picker), de-duplicated.
-export function listOnPath(dirs: string[], names: string[], exists: (p: string) => boolean): string[] {
+export function listOnPath(
+  dirs: string[],
+  names: string[],
+  exists: (p: string) => boolean,
+  platform: NodeJS.Platform = process.platform,
+): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const dir of dirs) {
     for (const name of names) {
       const full = dir.endsWith('/') || dir.endsWith('\\') ? dir + name : `${dir}/${name}`;
-      const key = full.toLowerCase();
+      const key = dedupeKey(full, platform);
       if (seen.has(key)) {
         continue;
       }

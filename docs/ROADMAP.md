@@ -1,6 +1,6 @@
 # Roadmap (internal, numbered)
 
-Status: Phases 1–7 complete. No phase is skipped; each lands with tests,
+Status: Phases 1–8 complete. No phase is skipped; each lands with tests,
 validation runs, docs updates and an honest limitation report.
 
 - [x] **Phase 1 — Repository Foundation & Architecture**: Karkain inspection
@@ -46,7 +46,13 @@ validation runs, docs updates and an honest limitation report.
       into build/run, status-bar indicator, host-only debugging documented.
       Verified: wasm32-wasi builds a runnable-module file, foreign `run` is
       refused (exit 6), unknown targets and missing cross-linkers fail loudly.
-- [ ] **Phase 8 — Production Hardening**: security review, cancellation,
-      cross-platform (win/linux/mac) validation, performance, UX refinement.
+- [x] **Phase 8 — Production Hardening**: `docs/SECURITY.md` (argv-only
+      spawning audit, terminal quoting with trailing-backslash hardening,
+      workspace-trust refusal, no telemetry); `quoteTerminalArg` extracted with
+      unit tests; case-sensitive PATH dedupe on Linux; guarded test discovery;
+      editor context menus for file commands; manual
+      `scripts/toolchain-smoke.mjs` gate (15/15 PASS live) beside the LSP
+      smoke gate. No bundler: the vsce size hint is documented, startup cost
+      is negligible at this size, and the toolchain call stays dependency-free.
 - [ ] **Phase 9 — Packaging / Release**: `.vsix` verification matrix, icon,
       publisher decision, Marketplace metadata, release automation, install docs.

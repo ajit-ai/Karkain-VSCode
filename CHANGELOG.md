@@ -4,6 +4,18 @@ All notable changes follow Semantic Versioning. The extension stays pre-1.0
 until core language support, diagnostics, build, run, IntelliSense, tests, green
 CI, VSIX packaging, complete docs and understood cross-platform behavior.
 
+## [0.8.0] — 2026-09-24 (Phase 8 hardening)
+
+- Security documented (`docs/SECURITY.md`) and audited: argv-only spawning, no
+  `shell:true`/network/telemetry, quoted terminal lines with
+  trailing-backslash hardening, workspace-trust refusal, no toolchain
+  auto-download.
+- `quoteTerminalArg` extracted from the terminal path with unit tests;
+  PATH dedupe is case-sensitive on Linux; test discovery guards failures.
+- Editor context menu for check/build/run/test/debug on `.kark` files.
+- New manual `scripts/toolchain-smoke.mjs` gate (15/15 PASS live: version,
+  check, schema-v1, fmt, targets, cross behaviors, tests, `-g` build).
+
 ## [0.7.0] — 2026-09-24 (Phase 7 targets)
 
 - `Karkain: Select Target` backed by the live `karkain target` matrix:

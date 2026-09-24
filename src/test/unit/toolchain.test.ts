@@ -9,6 +9,7 @@ import {
   isKarkFile,
   listOnPath,
   parseVersionString,
+  quoteTerminalArg,
   resolveOnPath,
   runArgs,
   splitPathEnv,
@@ -97,12 +98,34 @@ describe('toolchain', () => {
     it('resolves the first existing candidate', () => {
       const have = new Set(['/tools/karkain', 'C:/t/karkain.exe']);
       const exists = (p: string) => have.has(p);
-      assert.strictEqual(resolveOnPath(['/bin', '/tools'], ['karkain'], exists), '/tools/karkain');
-      assert.strictEqual(resolveOnPath(['/bin'], ['nope'], exists), null);
-      assert.deepStrictEqual(listOnPath(['C:/t', '/tools'], ['karkain.exe', 'karkain'], exists), [
+      assert.strictEqual(resolveOnPath(['/bin', '/tools'], ['karkain'], exists, 'linux'), '/tools/karkain');
+      assert.strictEqual(resolveOnPath(['/bin'], ['nope'], exists, 'linux'), null);
+      assert.deepStrictEqual(listOnPath(['C:/t', '/tools'], ['karkain.exe', 'karkain'], exists, 'win32'), [
         'C:/t/karkain.exe',
         '/tools/karkain',
       ]);
+    });
+
+    it('dedupes case-sensitively on Linux only', () => {
+      const have = new Set(['/t/Karkain', '/t/karkain']);
+      const exists = (p: string) => have.has(p);
+      assert.deepStrictEqual(listOnPath(['/t'], ['Karkain', 'karkain'], exists, 'linux'), [
+        '/t/Karkain',
+        '/t/karkain',
+      ]);
+      assert.deepStrictEqual(listOnPath(['/t'], ['Karkain', 'karkain'], exists, 'win32'), ['/t/Karkain']);
+    });
+  });
+
+  describe('quoteTerminalArg', () => {
+    it('double-quotes and escapes inner quotes', () => {
+      assert.strictEqual(quoteTerminalArg('a.kark'), '"a.kark"');
+      assert.strictEqual(quoteTerminalArg('C:\\my dir\\a.kark'), '"C:\\my dir\\a.kark"');
+      assert.strictEqual(quoteTerminalArg('say "hi"'), '"say \\"hi\\""');
+    });
+
+    it('doubles trailing backslashes so the quote cannot escape', () => {
+      assert.strictEqual(quoteTerminalArg('C:\\dir\\'), '"C:\\dir\\\\"');
     });
   });
 

@@ -2,7 +2,7 @@
   "name": "karkain",
   "displayName": "Karkain for Visual Studio Code",
   "description": "Development environment for the Karkain programming language (.kark): syntax highlighting, Karkain CLI integration (check, build, run, format) and Karkain Language Server (karkain lsp) intelligence. Requires the Karkain 1.1.0 toolchain.",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "publisher": "karkain",
   "license": "MIT",
   "repository": {
@@ -120,6 +120,64 @@
         "title": "Karkain: Restart Language Server"
       }
     ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "karkain.check",
+          "when": "editorLangId == karkain",
+          "group": "karkain"
+        },
+        {
+          "command": "karkain.build",
+          "when": "editorLangId == karkain",
+          "group": "karkain"
+        },
+        {
+          "command": "karkain.run",
+          "when": "editorLangId == karkain",
+          "group": "karkain"
+        },
+        {
+          "command": "karkain.test",
+          "when": "editorLangId == karkain",
+          "group": "karkain"
+        },
+        {
+          "command": "karkain.debug",
+          "when": "editorLangId == karkain",
+          "group": "karkain"
+        }
+      ]
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "karkain.check",
+          "when": "editorLangId == karkain",
+          "group": "karkain"
+        },
+        {
+          "command": "karkain.build",
+          "when": "editorLangId == karkain",
+          "group": "karkain"
+        },
+        {
+          "command": "karkain.run",
+          "when": "editorLangId == karkain",
+          "group": "karkain"
+        },
+        {
+          "command": "karkain.test",
+          "when": "editorLangId == karkain",
+          "group": "karkain"
+        },
+        {
+          "command": "karkain.debug",
+          "when": "editorLangId == karkain",
+          "group": "karkain"
+        }
+      ]
+    },
     "taskDefinitions": [
       {
         "type": "karkain",
@@ -179,6 +237,7 @@
     "format:check": "prettier --check .",
     "test:unit": "npm run compile && mocha",
     "test:lsp-smoke": "node scripts/lsp-smoke.mjs",
+    "test:toolchain-smoke": "node scripts/toolchain-smoke.mjs",
     "package": "vsce package"
   },
   "dependencies": {

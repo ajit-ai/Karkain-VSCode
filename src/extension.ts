@@ -21,6 +21,7 @@ import {
   isKarkFile,
   listOnPath,
   parseVersionString,
+  quoteTerminalArg,
   resolveOnPath,
   runArgs,
   splitPathEnv,
@@ -61,10 +62,6 @@ const testRanges = new Map<string, vscode.Range>();
 
 function log(msg: string): void {
   channel?.appendLine(msg);
-}
-
-function quoteArg(a: string): string {
-  return '"' + a.replace(/"/g, '\\"') + '"';
 }
 
 function execTool(args: string[], cwd?: string): Promise<{ code: number; stdout: string; stderr: string }> {
@@ -180,7 +177,7 @@ function activeKarkainDocument(): vscode.TextDocument | null {
 function runInTerminal(label: string, args: string[], cwd?: string): void {
   const term = vscode.window.createTerminal({ name: label, cwd });
   term.show(true);
-  term.sendText(`${getCompilerPath()} ${args.map(quoteArg).join(' ')}`);
+  term.sendText(`${getCompilerPath()} ${args.map(quoteTerminalArg).join(' ')}`);
 }
 
 // Working directory for file commands: the karkain.toml project root when the
@@ -479,7 +476,13 @@ async function refreshAllTests(): Promise<void> {
   if (!testController) {
     return;
   }
-  const files = await vscode.workspace.findFiles('**/*_test.kark');
+  let files: vscode.Uri[];
+  try {
+    files = await vscode.workspace.findFiles('**/*_test.kark');
+  } catch (e) {
+    log(`test discovery failed: ${(e as Error).message}`);
+    return;
+  }
   const keep = new Set(files.map((f) => f.toString()));
   const stale: string[] = [];
   testController.items.forEach((item) => {
@@ -711,7 +714,7 @@ export function activate(context: vscode.ExtensionContext): void {
     true,
   );
   context.subscriptions.push(testRunProfile);
-  log('Karkain for Visual Studio Code 0.7.0 activated.');
+  log('Karkain for Visual Studio Code 0.8.0 activated.');
   void probeToolchain();
   startLanguageClient(context);
   void refreshAllTests();
