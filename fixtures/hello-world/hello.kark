@@ -1,0 +1,6 @@
+// Karkain hello-world fixture (matches upstream
+// examples/01-fundamentals/01_hello_world.kark).
+// Run: karkain run fixtures/hello-world/hello.kark
+func main() {
+    print("Hello, Karkain!")
+}

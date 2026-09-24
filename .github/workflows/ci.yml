@@ -1,0 +1,38 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    # NOTE (Phase 1): unit + packaging only. VS Code integration tests land in
+    # Phase 3 together with a real Karkain 1.1.0 toolchain build; no fake-green
+    # integration job is included before then.
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run test:unit
+      - run: npx --yes @vscode/vsce package --no-yarn
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix-${{ matrix.os }}
+          path: '*.vsix'
+      - name: repository hygiene
+        shell: bash
+        run: |
+          test ! -d out || { echo 'out/ must not be committed'; exit 1; }
+          test -z "$(git status --porcelain --ignored=no . | grep -v '^??' || true)" || { echo 'working tree has tracked modifications'; git status --porcelain; exit 1; }

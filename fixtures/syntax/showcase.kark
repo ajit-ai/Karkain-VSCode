@@ -1,0 +1,55 @@
+// Syntax showcase fixture. Every construct below is verified against the real
+// Karkain 1.1.0 toolchain (see docs/KARKAIN-INSPECTION.md §9): untyped funcs,
+// `type X struct`, `enum X`, parens conditions, int/enum match with wildcard,
+// let/var with reassignment, for-in, C-style for, while, print.
+// Expected `karkain run` output: 42 / big / 200 / three / 6 / 0 / 1 / 2 / 0
+func add(a, b) {
+    return a + b
+}
+
+type Counter struct { value int; owner string }
+
+enum Color { Red, Green }
+
+func classify(n) {
+    if (n < 10) {
+        return "small"
+    } else {
+        return "big"
+    }
+}
+
+func describe(c) {
+    let r = match c {
+        Color.Red => 100,
+        Color.Green => 200,
+        _ => 999
+    }
+    return r
+}
+
+func main() {
+    let c = Counter{value: 1, owner: "karkain"}
+    print(add(c.value, 41))
+    print(classify(42))
+    print(describe(Color.Green))
+    let x = 3
+    let label = match x {
+        1 => "one",
+        3 => "three",
+        _ => "other"
+    }
+    print(label)
+    var total = 0
+    for i in [1, 2, 3] {
+        total = total + i
+    }
+    print(total)
+    for let j = 0; j < 3; j = j + 1 {
+        print(j)
+    }
+    while (total > 0) {
+        total = total - 1
+    }
+    print(total)
+}

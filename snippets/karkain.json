@@ -1,0 +1,67 @@
+{
+  "Karkain main function": {
+    "prefix": "main",
+    "body": ["func main() {", "\t${1:println(\"${2:Hello, Karkain!}\")}$0", "}"],
+    "description": "Karkain program entry point (func main)."
+  },
+  "Karkain function": {
+    "prefix": "func",
+    "body": ["func ${1:name}(${2:params}) {", "\t$0", "}"],
+    "description": "Karkain function declaration (untyped params, as implemented)."
+  },
+  "Karkain if else": {
+    "prefix": "if",
+    "body": ["if (${1:cond}) {", "\t$0", "} else {", "\t", "}"],
+    "description": "Karkain if/else control flow."
+  },
+  "Karkain while loop": {
+    "prefix": "while",
+    "body": ["while (${1:cond}) {", "\t$0", "}"],
+    "description": "Karkain while loop."
+  },
+  "Karkain for-in loop": {
+    "prefix": "forin",
+    "body": ["for ${1:x} in ${2:items} {", "\t$0", "}"],
+    "description": "Karkain for-in loop over arrays and maps."
+  },
+  "Karkain C-style for loop": {
+    "prefix": "for",
+    "body": ["for let ${1:i} = ${2:0}; ${1:i} < ${3:n}; ${1:i} = ${1:i} + 1 {", "\t$0", "}"],
+    "description": "Karkain C-style for loop with let init."
+  },
+  "Karkain match on Option": {
+    "prefix": "match",
+    "body": [
+      "match ${1:value} {",
+      "\tSome(${2:v}) => ${3:println(${2:v})},",
+      "\tNone => ${4:println(\"none\")}$0",
+      "}"
+    ],
+    "description": "Karkain exhaustive match on an Option value."
+  },
+  "Karkain type struct": {
+    "prefix": "struct",
+    "body": "type ${1:Name} struct { ${2:field} ${3:int} }",
+    "description": "Karkain struct (record) declaration: type Name struct { field type }."
+  },
+  "Karkain enum": {
+    "prefix": "enum",
+    "body": ["enum ${1:Name} {", "\t${2:Red}, ${3:Green}$0", "}"],
+    "description": "Karkain enum declaration with comma-separated variants."
+  },
+  "Karkain import module": {
+    "prefix": "import",
+    "body": "import ${1:math}",
+    "description": "Karkain sibling-module import (requires the module file in the same unit)."
+  },
+  "Karkain print line": {
+    "prefix": "println",
+    "body": "println(${1:\"${2:text}\"})",
+    "description": "Karkain println builtin."
+  },
+  "Karkain let binding": {
+    "prefix": "let",
+    "body": "let ${1:name} = ${2:value}",
+    "description": "Karkain let variable binding."
+  }
+}

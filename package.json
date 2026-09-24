@@ -1,0 +1,144 @@
+{
+  "name": "karkain",
+  "displayName": "Karkain for Visual Studio Code",
+  "description": "Development environment for the Karkain programming language (.kark): syntax highlighting, Karkain CLI integration (check, build, run, format) and Karkain Language Server (karkain lsp) intelligence. Requires the Karkain 1.1.0 toolchain.",
+  "version": "0.2.0",
+  "publisher": "karkain",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ajit-ai/Karkain-VSCode.git"
+  },
+  "homepage": "https://github.com/ajit-ai/Karkain-VSCode",
+  "bugs": {
+    "url": "https://github.com/ajit-ai/Karkain-VSCode/issues"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Formatters",
+    "Linters"
+  ],
+  "keywords": [
+    "karkain",
+    "heterogeneous",
+    "compiler",
+    "lsp"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Karkain for VS Code spawns the Karkain compiler toolchain; it requires a trusted workspace."
+    }
+  },
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:karkain",
+    "onCommand:karkain.check",
+    "onCommand:karkain.build",
+    "onCommand:karkain.run",
+    "onCommand:karkain.formatDocument",
+    "onCommand:karkain.showEnvironment",
+    "onCommand:karkain.restartLanguageServer"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "karkain",
+        "aliases": [
+          "Karkain"
+        ],
+        "extensions": [
+          ".kark"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "karkain",
+        "scopeName": "source.karkain",
+        "path": "./syntaxes/karkain.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "karkain",
+        "path": "./snippets/karkain.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "karkain.check",
+        "title": "Karkain: Check File"
+      },
+      {
+        "command": "karkain.build",
+        "title": "Karkain: Build File"
+      },
+      {
+        "command": "karkain.run",
+        "title": "Karkain: Run File"
+      },
+      {
+        "command": "karkain.formatDocument",
+        "title": "Karkain: Format Document"
+      },
+      {
+        "command": "karkain.showEnvironment",
+        "title": "Karkain: Show Environment"
+      },
+      {
+        "command": "karkain.restartLanguageServer",
+        "title": "Karkain: Restart Language Server"
+      }
+    ],
+    "configuration": {
+      "title": "Karkain",
+      "properties": {
+        "karkain.compilerPath": {
+          "type": "string",
+          "default": "karkain",
+          "description": "Path to the Karkain compiler executable (absolute path or a name resolved via PATH)."
+        },
+        "karkain.debuggerPath": {
+          "type": "string",
+          "default": "gdb",
+          "description": "Path to the GDB executable used for native debugging of Karkain-built binaries (absolute path or a name resolved via PATH)."
+        },
+        "karkain.formatOnSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "Format .kark documents on save using `karkain fmt`. Requires Karkain 1.1.0 or newer."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "typecheck": "tsc --noEmit -p ./",
+    "lint": "eslint src --ext .ts",
+    "format:check": "prettier --check .",
+    "test:unit": "npm run compile && mocha",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.12.0",
+    "@types/vscode": "^1.75.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "@vscode/vsce": "^2.24.0",
+    "eslint": "^8.57.0",
+    "mocha": "^10.4.0",
+    "prettier": "^3.2.5",
+    "typescript": "^5.4.0"
+  }
+}

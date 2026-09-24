@@ -1,0 +1,6 @@
+// Negative diagnostics fixture. On Karkain 1.1.0 `karkain check` rejects this
+// with a parse error (exit 3); older toolchains may accept it. Extension
+// integration tests (Phase 3) assert the 1.1.0 behavior only.
+func main() {
+    let = 42
+}

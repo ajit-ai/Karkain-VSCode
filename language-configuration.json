@@ -1,0 +1,42 @@
+{
+  "comments": {
+    "lineComment": "//"
+  },
+  "brackets": [
+    ["{", "}"],
+    ["[", "]"],
+    ["(", ")"]
+  ],
+  "autoClosingPairs": [
+    ["{", "}"],
+    ["[", "]"],
+    ["(", ")"],
+    ["\"", "\""]
+  ],
+  "surroundingPairs": [
+    ["{", "}"],
+    ["[", "]"],
+    ["(", ")"],
+    ["\"", "\""]
+  ],
+  "wordPattern": "[A-Za-z_][A-Za-z0-9_]*",
+  "indentationRules": {
+    "increaseIndentPattern": "^\\s*(func|if|else|while|for|match|struct|enum|macro|comptime|actor)\\b.*\\{\\s*$|^.*\\{\\s*$",
+    "decreaseIndentPattern": "^\\s*\\}"
+  },
+  "onEnterRules": [
+    {
+      "beforeText": "^\\s*//.*",
+      "action": {
+        "indentAction": "none",
+        "appendText": "// "
+      }
+    }
+  ],
+  "folding": {
+    "markers": {
+      "start": "^\\s*func\\b",
+      "end": "^\\s*\\}"
+    }
+  }
+}
