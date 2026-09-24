@@ -1,0 +1,20 @@
+{
+  // Copy to YOUR workspace as .vscode/tasks.json alongside launch.json
+  // (template, not workspace state).
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "karkain: build -g current file",
+      "type": "shell",
+      "command": "karkain build -g ${file} -o ${fileDirname}/${fileBasenameNoExtension}",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "silent"
+      },
+      "problemMatcher": "$gcc"
+    }
+  ]
+}

@@ -50,8 +50,12 @@ description, license, targets`), not the `[package]` table sketched in
   (see `fixtures/project/`). Lockfile `karkain.lock`, auth `~/.karkain/auth.json`.
 - File commands always need a file: bare `run/check/build` in a project dir
   exit 2 (`No input .kark file specified`). `test <path>` discovers
-  `*_test.kark` and runs `test_*` funcs (`PASS …` + `Test Summary`, exit 0;
-  on Windows the kcc runner may print non-fatal Winsock linker noise).
+  `*_test.kark` and runs `test_*` funcs: `=== Running tests in <staged> ===`,
+  interleaved program output, `␣␣PASS name` / `␣␣FAIL name` lines, assertion
+  detail (`assertion failed: assert_eq: …` + `expected:`/`actual:` lines),
+  `=== Test Summary: … ===` plus `N passed; M failed; S skipped; T total`;
+  exit 0 all-pass, 4 on any failure. On Windows the kcc runner also prints
+  non-fatal Winsock linker noise that never alters the result lines.
 - Multi-file units: sibling files in one directory, root file last;
   `import math` + `public func/type/enum` gating (SPEC.md §15).
 - Stdlib modules: `std.string collections io encoding crypto testing numerics
@@ -96,6 +100,14 @@ net http db` (both engines byte-identical).
 - Debug model: `karkain build -g` (DWARF + `#line`) then GDB via `cppdbg`
   (in-tree `editors/vscode/launch.json` + `runDebug`). No Debug Adapter
   Protocol server exists in the compiler.
+- Verified live: `-g` binary runs and prints correctly; GDB resolves
+  `karkain_user_*` symbols, sets breakpoints, backtraces and exits normally.
+  `karkain debug <file>` prints the program output plus
+  `karkain:<file>:enter/leave <func>` trace lines on stderr (exit 0), but it
+  also deletes a same-directory `.exe` and leaves generated `.c` beside the
+  source — the extension therefore builds immediately before launching.
+  `karkain build` of a test-only file fails to link (`undefined reference to
+WinMain`, exit 6): no debuggable test binary exists.
 
 ## 7. In-tree prototype (editors/vscode on main)
 

@@ -4,6 +4,38 @@ All notable changes follow Semantic Versioning. The extension stays pre-1.0
 until core language support, diagnostics, build, run, IntelliSense, tests, green
 CI, VSIX packaging, complete docs and understood cross-platform behavior.
 
+## [0.6.0] — 2026-09-24 (Phase 6 debugging)
+
+- `Karkain: Debug File (gdb)`: verified `karkain build -g` of the active file,
+  then GDB launch via cppdbg — never on a stale or missing binary (build
+  failure or missing output aborts with a `Karkain Debug` channel report).
+- Launch + attach configurations (`cppdbg`, `MIMode: gdb`, configurable
+  `miDebuggerPath`, Value pretty-printing) with unit-tested builders;
+  `templates/launch.json` + `templates/tasks.json` for workspace setup.
+- Verified live: `-g` binary runs (prints 42); GDB resolves `karkain_user_add`,
+  breaks, backtraces and exits normally; `karkain debug` emits the
+  `karkain:<file>:enter/leave` trace on stderr (verified: it also removes a
+  same-directory `.exe` and leaves generated `.c` — build immediately before
+  launching).
+- Debug-test profile resolved as unsupported: test-only files have no `main`
+  and fail to link (`undefined reference to WinMain`, exit 6), so no Debug
+  test profile is offered rather than a broken one.
+
+## [0.5.0] — 2026-09-24 (Phase 5 formatting/testing)
+
+- Testing API integration: Test Explorer tree of `*_test.kark` files and
+  `test_*` functions, discovered semantically via document symbols with a
+  logged textual fallback; per-file `karkain test` runs mapped by exact name
+  (the runner's `--filter` is substring-based, so it is not used for
+  single-test scoping); `PASS/FAIL` + totals parsing; assertion detail attached
+  with navigation to the test declaration; cancellation kills the runner;
+  dedicated `Karkain Test` output channel; `Karkain: Test` command (active file
+  or whole workspace); refresh on save and on file create/change/delete.
+- Formatting: provider honors cancellation (kills `fmt`); `fmt --check`
+  verified (`already formatted.`, exit 0); range formatting intentionally absent
+  (neither CLI nor server offers it).
+- Debug-test profile deferred to Phase 6: no debug adapter exists yet.
+
 ## [0.4.0] — 2026-09-24 (Phase 4 build/run/toolchain)
 
 - `karkain.toml` project-root detection with `src/main.kark` + `tests/` layout

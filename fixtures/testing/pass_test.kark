@@ -1,0 +1,9 @@
+// Passing test fixture (verified: `karkain test` exit 0, 2 passed).
+func test_add() {
+    let r = 1 + 1
+    print(r)
+}
+
+func test_second() {
+    print("two")
+}

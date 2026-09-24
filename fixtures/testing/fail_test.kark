@@ -1,0 +1,8 @@
+// Failing test fixture (verified: `karkain test` exit 4, 1 passed + 1 failed).
+func test_ok() {
+    print("ok")
+}
+
+func test_bad() {
+    assert_eq(1, 2)
+}

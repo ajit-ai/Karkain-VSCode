@@ -1,6 +1,6 @@
 # Roadmap (internal, numbered)
 
-Status: Phases 1–4 complete. No phase is skipped; each lands with tests,
+Status: Phases 1–6 complete. No phase is skipped; each lands with tests,
 validation runs, docs updates and an honest limitation report.
 
 - [x] **Phase 1 — Repository Foundation & Architecture**: Karkain inspection
@@ -25,12 +25,21 @@ validation runs, docs updates and an honest limitation report.
       to the project root. Verified: file commands always need a file (bare
       `run/check/build` exit 2); `pkg init` shape recorded in
       `fixtures/project/`.
-- [ ] **Phase 5 — Formatting / Testing**: `fmt --check` + format-on-save matrix,
-      error/cancellation paths, Testing API over `karkain test` (`*_test.kark`
-      discovery, `--filter`, output + source navigation).
-- [ ] **Phase 6 — Debugging**: `build -g` + `cppdbg`/GDB launch/attach
-      templates, `tasks.json` pre-launch build, breakpoint/stepping/variables
-      verification against real binaries. No custom debug UI.
+- [x] **Phase 5 — Formatting / Testing**: formatter cancellation support
+      (`fmt --check` documented, no fake range formatting — the server and CLI
+      are whole-document only); Testing API over `karkain test` (semantic
+      discovery via document symbols with logged textual fallback, per-file
+      runs mapped by exact name, `PASS/FAIL` + summary parsing, assertion
+      detail with source navigation, cancellation, `Karkain Test` channel,
+      `Karkain: Test` command, save/watch refresh). No debug-test profile:
+      test-only files cannot link (resolved in Phase 6).
+- [x] **Phase 6 — Debugging**: `Karkain: Debug File` (verified `build -g` then
+      cppdbg/GDB launch, never on a stale binary), launch + attach
+      configurations, `templates/launch.json` + `templates/tasks.json`,
+      `Karkain Debug` channel, `karkain.debuggerPath` wiring. Breakpoints,
+      stepping, variables, call stack, watch and evaluate come from GDB itself.
+      Debug-test profile resolved as unsupported: test-only files have no
+      `main` and fail to link (`undefined reference to WinMain`, exit 6).
 - [ ] **Phase 7 — Target / Heterogeneous**: `karkain target` matrix picker,
       `--target`-aware build/diagnostics, experimental targets labeled as such.
 - [ ] **Phase 8 — Production Hardening**: security review, cancellation,

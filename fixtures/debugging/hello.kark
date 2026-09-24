@@ -1,0 +1,10 @@
+// Debugging fixture: two functions so breakpoints, stepping and the call
+// stack are exercisable. Verified: `karkain build -g` emits a runnable
+// binary; GDB resolves karkain_user_add, breaks, backtraces and prints 42.
+func add(a, b) {
+    return a + b
+}
+
+func main() {
+    print(add(40, 2))
+}

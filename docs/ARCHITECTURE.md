@@ -13,6 +13,8 @@ src/
   lsp.ts          pure: server capability negotiation, version gate, symbol kinds
   project.ts      pure: karkain.toml root detection
   tasks.ts        pure: task argv/label/group builders
+  testing.ts      pure: test discovery + PASS/FAIL/summary parsing
+  debug.ts        pure: -g build argv, program path, cppdbg launch/attach configs
   config.ts       settings access (compilerPath/debuggerPath/formatOnSave)
   test/unit/      mocha unit tests for the pure modules
 fixtures/         real .kark programs (hello-world, diagnostics negatives,
@@ -42,9 +44,10 @@ re-probe on `karkain.*` setting changes. `deactivate` stops the client.
 ## Output
 
 Channels: `Karkain` (activation, probe results, check/format failures,
-`showEnvironment`) and `Karkain Language Server` (client output + trace, init
-failure surfacing). Build/Test/Debug channels arrive with the phases that own
-those integrations (4/5/6).
+`showEnvironment`), `Karkain Language Server` (client output + trace, init
+failure surfacing) and `Karkain Test` (per-file `$ karkain test …` runs with
+raw output and exit codes). Build/Debug channels arrive with the phases that
+own those integrations (4 done via terminals, 6).
 
 ## Language intelligence (Phase 3)
 

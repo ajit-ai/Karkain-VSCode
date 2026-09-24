@@ -1,0 +1,37 @@
+{
+  // Copy to YOUR workspace as .vscode/launch.json (template, not workspace
+  // state). Requires the Microsoft C/C++ extension (cppdbg) and GDB on PATH.
+  // Build first (`karkain build -g prog.kark -o prog`) or use the
+  // `Karkain: Debug File` command, which builds and launches in one step.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Karkain: Debug current file (gdb)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/${fileBasenameNoExtension}",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "MIMode": "gdb",
+      "miDebuggerPath": "gdb",
+      "preLaunchTask": "karkain: build -g current file",
+      "setupCommands": [
+        {
+          "description": "Pretty-print Karkain Value cells",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ]
+    },
+    {
+      "name": "Karkain: Attach to process (gdb)",
+      "type": "cppdbg",
+      "request": "attach",
+      "program": "${workspaceFolder}/${fileBasenameNoExtension}",
+      "processId": "${command:pickProcess}",
+      "MIMode": "gdb",
+      "miDebuggerPath": "gdb"
+    }
+  ]
+}

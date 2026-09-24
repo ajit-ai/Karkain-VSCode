@@ -30,7 +30,11 @@ real toolchain.
 
 ## Available through an existing interface (wired later, no Karkain change needed)
 
-- Testing API (`karkain test` discovers `*_test.kark`; `--filter` maps to run scoping) — Phase 5.
+- Testing API over the real runner: `*_test.kark` discovery (semantic symbols
+  first, logged textual fallback), per-file runs, `PASS/FAIL` + totals parsing,
+  assertion detail with navigation, cancellation, `Karkain Test` channel. No
+  invented test framework; `--filter` is not used for single-test scoping
+  because it is substring-based; debug-test waits for Phase 6.
 - Tasks integration for build/clean/workspace — Phase 4.
 - Target selection (`karkain target` matrix + `--target` flag) — Phase 7 (only
   targets the installed toolchain reports; experimental ones labeled as such).

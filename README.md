@@ -21,14 +21,21 @@ formatter, test runner and language server live in the Karkain repository.
 ```sh
 npm install
 npm run package
-code --install-extension karkain-0.4.0.vsix
+code --install-extension karkain-0.6.0.vsix
 ```
 
 ## Commands
 
-`Karkain: Check File` · `Build File` · `Run File` · `Clean` ·
+`Karkain: Check File` · `Build File` · `Run File` · `Clean` · `Test` ·
 `Format Document` · `Show Environment` · `Select Toolchain` ·
 `Restart Language Server`
+
+## Testing
+
+`Testing` view lists `*_test.kark` files and their `test_*` functions
+(discovered via document symbols). Run files or individual tests; results,
+assertion output and the totals line appear under each test and in the
+`Karkain Test` channel. Debug-test arrives with Phase 6.
 
 ## Tasks
 
@@ -36,18 +43,28 @@ code --install-extension karkain-0.4.0.vsix
 `.kark` file (build is the default build task with the `$gcc` matcher; clean
 runs in the `karkain.toml` project root when detected).
 
+## Debugging
+
+Requires GDB and the Microsoft C/C++ extension (`cppdbg`). `Karkain: Debug
+File` builds the active file with `karkain build -g` and launches it under
+GDB — breakpoints, stepping, variables, call stack, watch and evaluate all
+come from GDB. For manual `launch.json` setup, copy `templates/launch.json`
+and `templates/tasks.json` to your workspace `.vscode/` and press F5.
+`karkain.debuggerPath` selects the GDB binary. Test files cannot be debugged
+(they have no `main` and do not link).
+
 ## Settings
 
 `karkain.compilerPath` (default `karkain`) · `karkain.debuggerPath` (default
 `gdb`) · `karkain.formatOnSave` (default `false`).
 
-## Known limitations (Phase 4)
+## Known limitations (Phase 6)
 
 - `karkain fmt` whole-document formatting requires Karkain 1.1.0+.
 - Semantic features follow the server: rename, references, code actions and
   workspace symbols are absent from `karkain lsp` and are not faked.
-- No test-explorer, debug-adapter or target-picker UI yet (Phases 5–7);
-  debugging uses `karkain build -g` + GDB/`cppdbg`.
+- No target-picker UI yet (Phase 7); no debug-test profile (test files do not
+  link).
 - Desktop VS Code only; `vscode.dev` is unsupported (native toolchain).
 
 ## Development

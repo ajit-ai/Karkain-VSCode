@@ -32,7 +32,15 @@ import { KarkainDiagnostic, KarkainSeverity, tryParseCheckJson } from './diagnos
 import { KARKAIN_LANGUAGE_SERVER_ID, MIN_LANGUAGE_SERVER_VERSION } from './lsp';
 import { findProjectRoot } from './project';
 import { KarkainTaskKind, isFileScoped, taskArgs, taskGroup, taskLabel } from './tasks';
-import { getCompilerPath, getFormatOnSave } from './config';
+import {
+  parseTestResults,
+  parseTestSummary,
+  testFileArgs,
+  testNamesFromSymbols,
+  testNamesFromText,
+} from './testing';
+import { getCompilerPath, getDebuggerPath, getFormatOnSave } from './config';
+import { cppdbgLaunchConfig, debugBinaryPath, debugBuildArgs } from './debug';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type LanguageClientType = any;
@@ -41,7 +49,13 @@ let client: LanguageClientType | null = null;
 let detectedVersion: string | undefined;
 let channel: vscode.OutputChannel | undefined;
 let lspChannel: vscode.OutputChannel | undefined;
+let testChannel: vscode.OutputChannel | undefined;
 let problems: vscode.DiagnosticCollection | undefined;
+let testController: vscode.TestController | undefined;
+let testRunProfile: vscode.TestRunProfile | undefined;
+let debugChannel: vscode.OutputChannel | undefined;
+// `${uri}#${testName}` -> declaration range for failure navigation.
+const testRanges = new Map<string, vscode.Range>();
 
 function log(msg: string): void {
   channel?.appendLine(msg);
@@ -356,6 +370,309 @@ function reportCheck(
   vscode.window.setStatusBarMessage(`Karkain: ${diags.length} problem(s)`, 5000);
 }
 
+function testItemId(uri: vscode.Uri, name: string): string {
+  return `${uri.toString()}#${name}`;
+}
+
+function isTestFileUri(uri: vscode.Uri): boolean {
+  return isKarkFile(uri.fsPath) && uri.fsPath.toLowerCase().endsWith('_test.kark');
+}
+
+interface DiscoveredTests {
+  names: string[];
+  ranges: Map<string, vscode.Range>;
+}
+
+// Semantic discovery via the language server first, textual fallback (logged)
+// when symbols are unavailable.
+async function discoverTestNames(uri: vscode.Uri): Promise<DiscoveredTests> {
+  try {
+    const symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+      'vscode.executeDocumentSymbolProvider',
+      uri,
+    );
+    if (symbols && symbols.length > 0) {
+      const flat: { name: string; kind: number }[] = [];
+      const ranges = new Map<string, vscode.Range>();
+      const walk = (list: vscode.DocumentSymbol[]): void => {
+        for (const s of list) {
+          flat.push({ name: s.name, kind: s.kind as number });
+          if (s.kind === vscode.SymbolKind.Function && s.name.startsWith('test_') && !ranges.has(s.name)) {
+            ranges.set(s.name, s.selectionRange ?? s.range);
+          }
+          if (s.children) {
+            walk(s.children as vscode.DocumentSymbol[]);
+          }
+        }
+      };
+      walk(symbols);
+      return { names: testNamesFromSymbols(flat), ranges };
+    }
+  } catch (e) {
+    log(`document symbols unavailable for ${uri.fsPath}, textual fallback: ${(e as Error).message}`);
+  }
+  let text: string;
+  try {
+    text = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8');
+  } catch {
+    return { names: [], ranges: new Map() };
+  }
+  log(`test discovery for ${uri.fsPath} used textual fallback (LSP symbols unavailable)`);
+  const ranges = new Map<string, vscode.Range>();
+  text.split('\n').forEach((line, i) => {
+    const m = /^\s*func\s+(test_[A-Za-z0-9_]*)\s*\(/.exec(line);
+    if (m && !ranges.has(m[1])) {
+      ranges.set(m[1], new vscode.Range(i, 0, i, line.length));
+    }
+  });
+  return { names: testNamesFromText(text), ranges };
+}
+
+async function refreshTestFile(uri: vscode.Uri): Promise<void> {
+  if (!testController) {
+    return;
+  }
+  const { names, ranges } = await discoverTestNames(uri);
+  const fileId = uri.toString();
+  let fileItem = testController.items.get(fileId);
+  if (names.length === 0) {
+    if (fileItem) {
+      testController.items.delete(fileId);
+    }
+    return;
+  }
+  if (!fileItem) {
+    const base = fileId.split(/[\\/]/).pop() ?? fileId;
+    fileItem = testController.createTestItem(fileId, base, uri);
+    testController.items.add(fileItem);
+  }
+  const keep = new Set(names.map((n) => testItemId(uri, n)));
+  const stale: string[] = [];
+  fileItem.children.forEach((child) => {
+    if (!keep.has(child.id)) {
+      stale.push(child.id);
+    }
+  });
+  stale.forEach((id) => fileItem?.children.delete(id));
+  for (const name of names) {
+    const id = testItemId(uri, name);
+    if (!fileItem.children.get(id)) {
+      fileItem.children.add(testController.createTestItem(id, name, uri));
+    }
+    testRanges.set(id, ranges.get(name) ?? new vscode.Range(0, 0, 0, 0));
+  }
+}
+
+async function refreshAllTests(): Promise<void> {
+  if (!testController) {
+    return;
+  }
+  const files = await vscode.workspace.findFiles('**/*_test.kark');
+  const keep = new Set(files.map((f) => f.toString()));
+  const stale: string[] = [];
+  testController.items.forEach((item) => {
+    if (!keep.has(item.id)) {
+      stale.push(item.id);
+    }
+  });
+  stale.forEach((id) => testController?.items.delete(id));
+  for (const file of files) {
+    await refreshTestFile(file);
+  }
+}
+
+interface TestFileRun {
+  uri: vscode.Uri;
+  /** Null = whole file; otherwise the exact test names to mark. */
+  only: Set<string> | null;
+}
+
+function collectTestRuns(request: vscode.TestRunRequest): TestFileRun[] {
+  const excluded = new Set((request.exclude ?? []).map((item) => item.id));
+  const files = new Map<string, TestFileRun>();
+  const visitItem = (item: vscode.TestItem): void => {
+    if (excluded.has(item.id)) {
+      return;
+    }
+    if (item.children.size > 0 || !item.id.includes('#')) {
+      if (item.uri) {
+        files.set(item.id, { uri: item.uri, only: null });
+      }
+      return;
+    }
+    if (!item.uri) {
+      return;
+    }
+    const hash = item.id.lastIndexOf('#');
+    const fileId = item.id.slice(0, hash);
+    const entry = files.get(fileId) ?? { uri: item.uri, only: new Set<string>() };
+    if (entry.only) {
+      entry.only.add(item.label);
+    }
+    files.set(fileId, entry);
+  };
+  if (request.include && request.include.length > 0) {
+    request.include.forEach(visitItem);
+  } else {
+    testController?.items.forEach(visitItem);
+  }
+  // Exclusions inside whole-file runs become an explicit keep-set.
+  for (const [fileId, entry] of files) {
+    if (entry.only !== null) {
+      continue;
+    }
+    const hasExcludedTests = [...excluded].some((id) => id.startsWith(`${fileId}#`));
+    if (!hasExcludedTests) {
+      continue;
+    }
+    const keep = new Set<string>();
+    testController?.items.get(fileId)?.children.forEach((child) => {
+      if (!excluded.has(child.id)) {
+        keep.add(child.label);
+      }
+    });
+    entry.only = keep;
+  }
+  return [...files.values()];
+}
+
+async function executeTestRun(
+  request: vscode.TestRunRequest,
+  token: vscode.CancellationToken,
+): Promise<void> {
+  if (!testController) {
+    return;
+  }
+  const run = testController.createTestRun(request);
+  const targets = collectTestRuns(request);
+  for (const target of targets) {
+    if (token.isCancellationRequested) {
+      break;
+    }
+    const fileItem = testController.items.get(target.uri.toString());
+    const tests = target.only ?? new Set((await discoverTestNames(target.uri)).names);
+    const children = [...tests]
+      .map((name) => fileItem?.children.get(testItemId(target.uri, name)))
+      .filter((c): c is vscode.TestItem => !!c);
+    children.forEach((c) => run.started(c));
+    testChannel?.show(true);
+    testChannel?.appendLine(`$ karkain test ${target.uri.fsPath}`);
+    const folder = vscode.workspace.getWorkspaceFolder(target.uri)?.uri.fsPath;
+    const cwd = findProjectRoot(target.uri.fsPath) ?? folder;
+    const outcome = await new Promise<{ code: number | null; out: string; spawnError?: string }>(
+      (resolve) => {
+        const proc = spawn(getCompilerPath(), testFileArgs(target.uri.fsPath), { cwd });
+        let out = '';
+        proc.stdout.on('data', (d) => {
+          out += String(d);
+        });
+        proc.stderr.on('data', (d) => {
+          out += String(d);
+        });
+        const subscription = token.onCancellationRequested(() => proc.kill());
+        proc.on('error', (err) => {
+          subscription.dispose();
+          resolve({ code: null, out, spawnError: err.message });
+        });
+        proc.on('close', (code) => {
+          subscription.dispose();
+          resolve({ code, out });
+        });
+      },
+    );
+    if (outcome.spawnError !== undefined) {
+      testChannel?.appendLine(`failed to start: ${outcome.spawnError}`);
+      children.forEach((c) =>
+        run.errored(c, new vscode.TestMessage('Could not start the karkain executable.')),
+      );
+      continue;
+    }
+    testChannel?.append(outcome.out);
+    testChannel?.appendLine(`(exit ${outcome.code})`);
+    const byName = new Map(parseTestResults(outcome.out).map((r) => [r.name, r]));
+    if (byName.size === 0) {
+      const excerpt = outcome.out.trim().split('\n').slice(-5).join('\n') || `exit ${outcome.code}`;
+      children.forEach((c) => run.errored(c, new vscode.TestMessage(`No test results parsed:\n${excerpt}`)));
+      continue;
+    }
+    for (const child of children) {
+      const name = child.label;
+      const result = byName.get(name);
+      if (!result) {
+        run.skipped(child);
+        continue;
+      }
+      if (result.status === 'passed') {
+        run.passed(child, 0);
+        continue;
+      }
+      const message = new vscode.TestMessage(result.detail || `test ${name} failed`);
+      const range = testRanges.get(child.id);
+      if (range) {
+        message.location = new vscode.Location(target.uri, range);
+      }
+      run.failed(child, message, 0);
+    }
+    const summary = parseTestSummary(outcome.out);
+    if (summary) {
+      testChannel?.appendLine(
+        `${summary.passed} passed; ${summary.failed} failed; ${summary.skipped} skipped`,
+      );
+    }
+  }
+  run.end();
+}
+
+// Builds the active file with debug symbols, then launches it under GDB via
+// cppdbg. The build must succeed first: launching on a stale or missing
+// binary would debug the wrong program, so any build failure is reported and
+// the debugger never starts.
+async function runDebug(): Promise<void> {
+  const doc = activeKarkainDocument();
+  if (!doc) {
+    return;
+  }
+  const file = doc.uri.fsPath;
+  const program = debugBinaryPath(file, process.platform);
+  const folder = vscode.workspace.getWorkspaceFolder(doc.uri);
+  const cwd = effectiveCwd(file);
+  debugChannel?.show(true);
+  debugChannel?.appendLine(`$ karkain build -g ${file} -o ${program}`);
+  const build = await new Promise<{ code: number | null; out: string }>((resolve) => {
+    const proc = spawn(getCompilerPath(), debugBuildArgs(file, program), { cwd });
+    let out = '';
+    proc.stdout.on('data', (d) => {
+      out += String(d);
+    });
+    proc.stderr.on('data', (d) => {
+      out += String(d);
+    });
+    proc.on('error', (err) => resolve({ code: null, out: out + err.message }));
+    proc.on('close', (code) => resolve({ code, out }));
+  });
+  debugChannel?.append(build.out);
+  if (build.code !== 0) {
+    debugChannel?.appendLine(`(debug build failed, exit ${build.code})`);
+    void vscode.window.showErrorMessage('Karkain: debug build failed. See the Karkain Debug channel.');
+    return;
+  }
+  if (!fs.existsSync(program)) {
+    debugChannel?.appendLine(`expected binary missing: ${program}`);
+    void vscode.window.showErrorMessage(
+      'Karkain: debug build produced no binary. See the Karkain Debug channel.',
+    );
+    return;
+  }
+  const config = cppdbgLaunchConfig(program, getDebuggerPath());
+  debugChannel?.appendLine(`launching ${program} under GDB`);
+  const started = await vscode.debug.startDebugging(folder, config);
+  if (!started) {
+    void vscode.window.showErrorMessage(
+      'Karkain: debugger did not start. Is the C/C++ extension (cppdbg) installed and GDB on PATH?',
+    );
+  }
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   channel = vscode.window.createOutputChannel('Karkain');
   context.subscriptions.push(channel);
@@ -363,9 +680,23 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(lspChannel);
   problems = vscode.languages.createDiagnosticCollection('karkain');
   context.subscriptions.push(problems);
-  log('Karkain for Visual Studio Code 0.4.0 activated.');
+  testChannel = vscode.window.createOutputChannel('Karkain Test');
+  context.subscriptions.push(testChannel);
+  debugChannel = vscode.window.createOutputChannel('Karkain Debug');
+  context.subscriptions.push(debugChannel);
+  testController = vscode.tests.createTestController('karkainTests', 'Karkain Tests');
+  context.subscriptions.push(testController);
+  testRunProfile = testController.createRunProfile(
+    'Run',
+    vscode.TestRunProfileKind.Run,
+    executeTestRun,
+    true,
+  );
+  context.subscriptions.push(testRunProfile);
+  log('Karkain for Visual Studio Code 0.6.0 activated.');
   void probeToolchain();
   startLanguageClient(context);
+  void refreshAllTests();
 
   context.subscriptions.push(
     vscode.commands.registerCommand('karkain.check', () => {
@@ -390,6 +721,34 @@ export function activate(context: vscode.ExtensionContext): void {
       const doc = vscode.window.activeTextEditor?.document;
       const cwd = doc ? effectiveCwd(doc.uri.fsPath) : vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
       runInTerminal('karkain clean', cleanArgs(), cwd);
+    }),
+    vscode.commands.registerCommand('karkain.debug', () => {
+      void runDebug();
+    }),
+    vscode.commands.registerCommand('karkain.test', async () => {
+      if (!testController || !testRunProfile) {
+        return;
+      }
+      await refreshAllTests();
+      const doc = vscode.window.activeTextEditor?.document;
+      let include: readonly vscode.TestItem[] | undefined;
+      if (doc && isTestFileUri(doc.uri)) {
+        const fileItem = testController.items.get(doc.uri.toString());
+        if (!fileItem) {
+          void vscode.window.showInformationMessage('Karkain: no tests discovered in the active file.');
+          return;
+        }
+        include = [fileItem];
+      } else if (testController.items.size === 0) {
+        void vscode.window.showInformationMessage('Karkain: no *_test.kark files found in the workspace.');
+        return;
+      }
+      const source = new vscode.CancellationTokenSource();
+      try {
+        await executeTestRun(new vscode.TestRunRequest(include, undefined, testRunProfile), source.token);
+      } finally {
+        source.dispose();
+      }
     }),
     vscode.commands.registerCommand('karkain.selectToolchain', async () => {
       const found = discoverToolchains();
@@ -487,7 +846,7 @@ export function activate(context: vscode.ExtensionContext): void {
       // prints a status line, so the provider saves the buffer, formats, then
       // reloads the disk content as the edit. A dirty buffer that cannot be
       // saved is refused rather than formatted against stale disk content.
-      provideDocumentFormattingEdits(document) {
+      provideDocumentFormattingEdits(document, _options, token) {
         return (async (): Promise<vscode.TextEdit[] | null> => {
           if (document.isDirty) {
             const saved = await document.save();
@@ -496,20 +855,25 @@ export function activate(context: vscode.ExtensionContext): void {
               return null;
             }
           }
-          const r = await new Promise<{ code: number; stderr: string }>((resolve) => {
-            execFile(
-              getCompilerPath(),
-              fmtArgs(document.uri.fsPath),
-              { encoding: 'utf8' },
-              (err, _out, errText) => {
-                const execErr = err as { code?: unknown };
-                resolve({
-                  code: err && typeof execErr.code === 'number' ? (execErr.code as number) : -1,
-                  stderr: String(errText ?? ''),
-                });
-              },
-            );
+          const r = await new Promise<{ code: number | null; stderr: string }>((resolve) => {
+            const proc = spawn(getCompilerPath(), fmtArgs(document.uri.fsPath));
+            let stderr = '';
+            proc.stderr.on('data', (d) => {
+              stderr += String(d);
+            });
+            const subscription = token.onCancellationRequested(() => proc.kill());
+            proc.on('error', (err) => {
+              subscription.dispose();
+              resolve({ code: null, stderr: err.message });
+            });
+            proc.on('close', (code) => {
+              subscription.dispose();
+              resolve({ code, stderr });
+            });
           });
+          if (token.isCancellationRequested || r.code === null) {
+            return null;
+          }
           if (r.code !== 0) {
             log(`karkain fmt failed for ${document.uri.fsPath} (exit ${r.code}):\n${r.stderr}`);
             void vscode.window.showErrorMessage(
@@ -555,6 +919,24 @@ export function activate(context: vscode.ExtensionContext): void {
       if (e.affectsConfiguration('karkain')) {
         void probeToolchain();
       }
+    }),
+    vscode.workspace.onDidSaveTextDocument((doc) => {
+      if (testController && isTestFileUri(doc.uri)) {
+        void refreshTestFile(doc.uri);
+      }
+    }),
+  );
+  const testWatcher = vscode.workspace.createFileSystemWatcher('**/*_test.kark');
+  context.subscriptions.push(
+    testWatcher,
+    testWatcher.onDidCreate((uri) => {
+      void refreshTestFile(uri);
+    }),
+    testWatcher.onDidChange((uri) => {
+      void refreshTestFile(uri);
+    }),
+    testWatcher.onDidDelete((uri) => {
+      testController?.items.delete(uri.toString());
     }),
   );
 }
