@@ -34,5 +34,9 @@ jobs:
       - name: repository hygiene
         shell: bash
         run: |
-          test ! -d out || { echo 'out/ must not be committed'; exit 1; }
-          test -z "$(git status --porcelain --ignored=no . | grep -v '^??' || true)" || { echo 'working tree has tracked modifications'; git status --porcelain; exit 1; }
+          # No tracked file may be modified by the build (real dirtiness signal).
+          test -z "$(git status --porcelain | grep -v '^??' || true)" || { echo 'tracked files were modified during the build'; git status --porcelain; exit 1; }
+          # Build artifacts must be git-ignored, never committed.
+          for p in out node_modules *.vsix; do
+            git check-ignore -q "$p" || { echo "$p is not git-ignored"; exit 1; }
+          done
