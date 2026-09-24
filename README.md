@@ -21,20 +21,27 @@ formatter, test runner and language server live in the Karkain repository.
 ```sh
 npm install
 npm run package
-code --install-extension karkain-0.3.0.vsix
+code --install-extension karkain-0.4.0.vsix
 ```
 
 ## Commands
 
-`Karkain: Check File` · `Build File` · `Run File` · `Format Document` ·
-`Show Environment` · `Restart Language Server`
+`Karkain: Check File` · `Build File` · `Run File` · `Clean` ·
+`Format Document` · `Show Environment` · `Select Toolchain` ·
+`Restart Language Server`
+
+## Tasks
+
+`Terminal → Run Task` offers `karkain: build/check/run/clean` for the active
+`.kark` file (build is the default build task with the `$gcc` matcher; clean
+runs in the `karkain.toml` project root when detected).
 
 ## Settings
 
 `karkain.compilerPath` (default `karkain`) · `karkain.debuggerPath` (default
 `gdb`) · `karkain.formatOnSave` (default `false`).
 
-## Known limitations (Phase 3)
+## Known limitations (Phase 4)
 
 - `karkain fmt` whole-document formatting requires Karkain 1.1.0+.
 - Semantic features follow the server: rename, references, code actions and

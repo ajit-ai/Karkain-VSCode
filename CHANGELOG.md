@@ -4,6 +4,20 @@ All notable changes follow Semantic Versioning. The extension stays pre-1.0
 until core language support, diagnostics, build, run, IntelliSense, tests, green
 CI, VSIX packaging, complete docs and understood cross-platform behavior.
 
+## [0.4.0] — 2026-09-24 (Phase 4 build/run/toolchain)
+
+- `karkain.toml` project-root detection with `src/main.kark` + `tests/` layout
+  recorded from real `pkg init` output (`fixtures/project/`).
+- VS Code Tasks provider: `build` (default build group, `$gcc` matcher),
+  `check`, `run` for the active file, project-scoped `clean`; usable from
+  `tasks.json` via the `karkain` task definition.
+- Toolchain discovery across PATH with `Karkain: Select Toolchain` picker
+  (workspace-scoped setting) and `Karkain: Clean` command.
+- Terminals and `Show Environment` now report the project root, the resolved
+  executable and every toolchain on PATH.
+- Verified: bare `run/check/build` exit 2 (file always required); flat
+  `karkain.toml` keys (not the `[package]` table from SPEC §10.1).
+
 ## [0.3.0] — 2026-09-24 (Phase 3 language intelligence)
 
 - Hardened `karkain lsp` client: dedicated `Karkain Language Server` output

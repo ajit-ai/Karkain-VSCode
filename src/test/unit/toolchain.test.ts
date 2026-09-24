@@ -3,11 +3,15 @@ import {
   buildArgs,
   candidateExecutableNames,
   checkArgs,
+  cleanArgs,
   compareVersions,
   fmtArgs,
   isKarkFile,
+  listOnPath,
   parseVersionString,
+  resolveOnPath,
   runArgs,
+  splitPathEnv,
   supportsStructuredDiagnostics,
 } from '../../toolchain';
 
@@ -79,6 +83,32 @@ describe('toolchain', () => {
       assert.deepStrictEqual(candidateExecutableNames('win32'), ['karkain.exe', 'karkain']);
       assert.deepStrictEqual(candidateExecutableNames('linux'), ['karkain']);
       assert.deepStrictEqual(candidateExecutableNames('darwin'), ['karkain']);
+    });
+  });
+
+  describe('PATH resolution', () => {
+    it('splits PATH with the platform delimiter', () => {
+      assert.deepStrictEqual(splitPathEnv('C:\\a;C:\\b;;', 'win32'), ['C:\\a', 'C:\\b']);
+      assert.deepStrictEqual(splitPathEnv('/a:/b:', 'linux'), ['/a', '/b']);
+      assert.deepStrictEqual(splitPathEnv(undefined, 'linux'), []);
+      assert.deepStrictEqual(splitPathEnv('', 'win32'), []);
+    });
+
+    it('resolves the first existing candidate', () => {
+      const have = new Set(['/tools/karkain', 'C:/t/karkain.exe']);
+      const exists = (p: string) => have.has(p);
+      assert.strictEqual(resolveOnPath(['/bin', '/tools'], ['karkain'], exists), '/tools/karkain');
+      assert.strictEqual(resolveOnPath(['/bin'], ['nope'], exists), null);
+      assert.deepStrictEqual(listOnPath(['C:/t', '/tools'], ['karkain.exe', 'karkain'], exists), [
+        'C:/t/karkain.exe',
+        '/tools/karkain',
+      ]);
+    });
+  });
+
+  describe('cleanArgs', () => {
+    it('builds the bare project clean', () => {
+      assert.deepStrictEqual(cleanArgs(), ['clean']);
     });
   });
 });

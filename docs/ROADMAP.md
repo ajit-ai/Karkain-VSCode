@@ -1,6 +1,6 @@
 # Roadmap (internal, numbered)
 
-Status: Phases 1–3 complete. No phase is skipped; each lands with tests,
+Status: Phases 1–4 complete. No phase is skipped; each lands with tests,
 validation runs, docs updates and an honest limitation report.
 
 - [x] **Phase 1 — Repository Foundation & Architecture**: Karkain inspection
@@ -18,9 +18,13 @@ validation runs, docs updates and an honest limitation report.
       `fixtures/lsp/smoke.kark`, manual `scripts/lsp-smoke.mjs` gate (17/17
       PASS live: handshake, push diagnostics, completion, hover, definition,
       symbols, semantic tokens).
-- [ ] **Phase 4 — Build / Run / Toolchain**: `karkain.toml` project-root
-      detection, Tasks integration (build/clean/workspace), PATH + multi-install
-      selection, `showEnvironment` expansion, terminal/output refinement.
+- [x] **Phase 4 — Build / Run / Toolchain**: `karkain.toml` project-root
+      detection (`src/project.ts`), Tasks provider (`build` in the build group
+      with `$gcc`, `check`/`run`/`clean`), PATH toolchain discovery with a
+      `Select Toolchain` picker, expanded `Show Environment`, terminal cwd set
+      to the project root. Verified: file commands always need a file (bare
+      `run/check/build` exit 2); `pkg init` shape recorded in
+      `fixtures/project/`.
 - [ ] **Phase 5 — Formatting / Testing**: `fmt --check` + format-on-save matrix,
       error/cancellation paths, Testing API over `karkain test` (`*_test.kark`
       discovery, `--filter`, output + source navigation).

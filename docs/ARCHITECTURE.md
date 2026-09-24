@@ -11,6 +11,8 @@ src/
   toolchain.ts    pure: version parse/compare, .kark match, argv builders
   diagnostics.ts  pure: check --format=json schema-v1 parsing/validation
   lsp.ts          pure: server capability negotiation, version gate, symbol kinds
+  project.ts      pure: karkain.toml root detection
+  tasks.ts        pure: task argv/label/group builders
   config.ts       settings access (compilerPath/debuggerPath/formatOnSave)
   test/unit/      mocha unit tests for the pure modules
 fixtures/         real .kark programs (hello-world, diagnostics negatives,

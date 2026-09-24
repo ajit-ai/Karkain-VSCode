@@ -9,21 +9,29 @@
 // toolchain.
 import * as vscode from 'vscode';
 import { execFile, spawn } from 'child_process';
+import * as fs from 'fs';
 import {
   buildArgs,
+  candidateExecutableNames,
   checkArgs,
+  cleanArgs,
   compareVersions,
   configArgs,
   fmtArgs,
   isKarkFile,
+  listOnPath,
   parseVersionString,
+  resolveOnPath,
   runArgs,
+  splitPathEnv,
   supportsStructuredDiagnostics,
   targetArgs,
   versionArgs,
 } from './toolchain';
 import { KarkainDiagnostic, KarkainSeverity, tryParseCheckJson } from './diagnostics';
 import { KARKAIN_LANGUAGE_SERVER_ID, MIN_LANGUAGE_SERVER_VERSION } from './lsp';
+import { findProjectRoot } from './project';
+import { KarkainTaskKind, isFileScoped, taskArgs, taskGroup, taskLabel } from './tasks';
 import { getCompilerPath, getFormatOnSave } from './config';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -153,10 +161,76 @@ function activeKarkainDocument(): vscode.TextDocument | null {
   return doc;
 }
 
-function runInTerminal(label: string, args: string[]): void {
-  const term = vscode.window.createTerminal({ name: label });
+function runInTerminal(label: string, args: string[], cwd?: string): void {
+  const term = vscode.window.createTerminal({ name: label, cwd });
   term.show(true);
   term.sendText(`${getCompilerPath()} ${args.map(quoteArg).join(' ')}`);
+}
+
+// Working directory for file commands: the karkain.toml project root when the
+// file lives in a project, else the workspace folder, else undefined.
+function effectiveCwd(file: string): string | undefined {
+  const root = findProjectRoot(file);
+  if (root) {
+    return root;
+  }
+  return vscode.workspace.getWorkspaceFolder(vscode.Uri.file(file))?.uri.fsPath;
+}
+
+function pathDirectories(): string[] {
+  return splitPathEnv(process.env.PATH, process.platform);
+}
+
+function toolchainNames(): string[] {
+  return candidateExecutableNames(process.platform);
+}
+
+// Every karkain executable found via PATH (de-duplicated), configured path first.
+function discoverToolchains(): string[] {
+  const found = listOnPath(pathDirectories(), toolchainNames(), (p) => fs.existsSync(p));
+  const configured = getCompilerPath();
+  const configuredIsPath = configured.includes('/') || configured.includes('\\');
+  if (configuredIsPath && fs.existsSync(configured) && !found.includes(configured)) {
+    return [configured, ...found];
+  }
+  return found;
+}
+
+function resolvedCompilerPath(): string {
+  const configured = getCompilerPath();
+  if (configured.includes('/') || configured.includes('\\')) {
+    return configured;
+  }
+  return resolveOnPath(pathDirectories(), toolchainNames(), (p) => fs.existsSync(p)) ?? configured;
+}
+
+function resolveTaskDefinition(
+  definition: { type: 'karkain'; task: KarkainTaskKind; file?: string },
+  folder: vscode.WorkspaceFolder | undefined,
+  cwdOverride?: string,
+): vscode.Task | undefined {
+  const kind = definition.task;
+  let args: string[];
+  try {
+    args = taskArgs({ kind, file: definition.file });
+  } catch {
+    return undefined;
+  }
+  const cwd =
+    cwdOverride ?? (definition.file ? effectiveCwd(definition.file) : undefined) ?? folder?.uri.fsPath;
+  const execution = new vscode.ShellExecution(getCompilerPath(), args, { cwd });
+  const task = new vscode.Task(
+    definition,
+    folder ?? vscode.TaskScope.Workspace,
+    taskLabel({ kind, file: definition.file }),
+    'karkain',
+    execution,
+    kind === 'build' ? '$gcc' : [],
+  );
+  if (taskGroup(kind) === 'build') {
+    task.group = vscode.TaskGroup.Build;
+  }
+  return task;
 }
 
 interface CheckSpawn {
@@ -289,7 +363,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(lspChannel);
   problems = vscode.languages.createDiagnosticCollection('karkain');
   context.subscriptions.push(problems);
-  log('Karkain for Visual Studio Code 0.3.0 activated.');
+  log('Karkain for Visual Studio Code 0.4.0 activated.');
   void probeToolchain();
   startLanguageClient(context);
 
@@ -303,14 +377,50 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('karkain.build', () => {
       const doc = activeKarkainDocument();
       if (doc) {
-        runInTerminal('karkain build', buildArgs(doc.uri.fsPath));
+        runInTerminal('karkain build', buildArgs(doc.uri.fsPath), effectiveCwd(doc.uri.fsPath));
       }
     }),
     vscode.commands.registerCommand('karkain.run', () => {
       const doc = activeKarkainDocument();
       if (doc) {
-        runInTerminal('karkain run', runArgs(doc.uri.fsPath));
+        runInTerminal('karkain run', runArgs(doc.uri.fsPath), effectiveCwd(doc.uri.fsPath));
       }
+    }),
+    vscode.commands.registerCommand('karkain.clean', () => {
+      const doc = vscode.window.activeTextEditor?.document;
+      const cwd = doc ? effectiveCwd(doc.uri.fsPath) : vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      runInTerminal('karkain clean', cleanArgs(), cwd);
+    }),
+    vscode.commands.registerCommand('karkain.selectToolchain', async () => {
+      const found = discoverToolchains();
+      const configured = getCompilerPath();
+      const inUse = resolvedCompilerPath();
+      if (found.length === 0) {
+        void vscode.window.showWarningMessage(
+          `Karkain: no karkain executable found on PATH (current setting: ${configured}). Install Karkain 1.1.0+ or set karkain.compilerPath.`,
+        );
+        return;
+      }
+      const pick = await vscode.window.showQuickPick(
+        found.map((p) => ({
+          label: p,
+          description: p === configured ? 'configured' : p === inUse ? 'in use' : '',
+        })),
+        { placeHolder: 'Select the Karkain toolchain executable' },
+      );
+      if (!pick) {
+        return;
+      }
+      if (!fs.existsSync(pick.label)) {
+        void vscode.window.showErrorMessage(`Karkain: ${pick.label} no longer exists.`);
+        return;
+      }
+      const folder = vscode.workspace.workspaceFolders?.[0];
+      const target = folder ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+      await vscode.workspace.getConfiguration('karkain').update('compilerPath', pick.label, target);
+      log(`Karkain toolchain selected: ${pick.label}`);
+      vscode.window.setStatusBarMessage(`Karkain: toolchain set to ${pick.label}`, 5000);
+      await probeToolchain();
     }),
     vscode.commands.registerCommand('karkain.formatDocument', () => {
       if (vscode.window.activeTextEditor) {
@@ -319,6 +429,10 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('karkain.showEnvironment', async () => {
       channel?.show(true);
+      log(`executable: ${getCompilerPath()} (resolved: ${resolvedCompilerPath()})`);
+      const active = vscode.window.activeTextEditor?.document;
+      log(`project root: ${active ? (findProjectRoot(active.uri.fsPath) ?? '(none)') : '(no active file)'}`);
+      log(`toolchains on PATH: ${discoverToolchains().join(', ') || '(none)'}`);
       for (const args of [versionArgs(), targetArgs(), configArgs()]) {
         const r = await execTool(args, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
         log(`$ karkain ${args.join(' ')} (exit ${r.code})\n${r.stdout}${r.stderr}`);
@@ -328,6 +442,45 @@ export function activate(context: vscode.ExtensionContext): void {
       await restartLanguageClient();
       startLanguageClient(context);
       vscode.window.setStatusBarMessage('Karkain: language server restarted', 3000);
+    }),
+    vscode.tasks.registerTaskProvider('karkain', {
+      provideTasks() {
+        const tasks: vscode.Task[] = [];
+        const doc = vscode.window.activeTextEditor?.document;
+        const isKark = !!doc && (doc.languageId === 'karkain' || isKarkFile(doc.uri.fsPath));
+        const folder =
+          (doc && vscode.workspace.getWorkspaceFolder(doc.uri)) ?? vscode.workspace.workspaceFolders?.[0];
+        if (isKark && doc) {
+          for (const kind of ['build', 'check', 'run'] as KarkainTaskKind[]) {
+            const resolved = resolveTaskDefinition(
+              { type: 'karkain', task: kind, file: doc.uri.fsPath },
+              folder,
+            );
+            if (resolved) {
+              tasks.push(resolved);
+            }
+          }
+        }
+        const cleanCwd = (doc && effectiveCwd(doc.uri.fsPath)) ?? folder?.uri.fsPath ?? process.cwd();
+        const clean = resolveTaskDefinition({ type: 'karkain', task: 'clean' }, folder, cleanCwd);
+        if (clean) {
+          tasks.push(clean);
+        }
+        return tasks;
+      },
+      resolveTask(task) {
+        const def = task.definition as { task?: string; file?: string };
+        if (typeof def.task !== 'string') {
+          return undefined;
+        }
+        const kind = def.task as KarkainTaskKind;
+        if (!isFileScoped(kind) && kind !== 'clean') {
+          return undefined;
+        }
+        const folder = def.file ? vscode.workspace.getWorkspaceFolder(vscode.Uri.file(def.file)) : undefined;
+        const scopeFolder = folder ?? vscode.workspace.workspaceFolders?.[0];
+        return resolveTaskDefinition({ type: 'karkain', task: kind, file: def.file }, scopeFolder, undefined);
+      },
     }),
     vscode.languages.registerDocumentFormattingEditProvider('karkain', {
       // `karkain fmt` rewrites the file in place (verified on 1.1.0) and only

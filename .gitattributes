@@ -1,9 +1,21 @@
 # Normalize line endings to LF for text files (avoids CRLF artifact classes).
+# Every text type the repo or toolchain may checkout must be listed: Windows
+# runners otherwise check out CRLF and prettier (endOfLine: lf) fails CI.
 *.ts text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.cjs text eol=lf
 *.json text eol=lf
 *.md text eol=lf
 *.kark text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
+*.toml text eol=lf
+*.sh text eol=lf
+*.txt text eol=lf
+.gitattributes text eol=lf
+.gitignore text eol=lf
+.vscodeignore text eol=lf
+LICENSE text eol=lf
 *.vsix binary
 *.exe binary

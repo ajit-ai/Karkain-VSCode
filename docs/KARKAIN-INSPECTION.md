@@ -44,8 +44,14 @@ failure, 5 package/dependency, 6 infrastructure (no C compiler).
 
 ## 3. Project model
 
-- Manifest `karkain.toml` (`[package]`, `[dependencies]`, `[features]`), lockfile
-  `karkain.lock`, cache `.karkain/cache/`, auth `~/.karkain/auth.json`.
+- Manifest `karkain.toml` uses **flat keys** as generated (`name, version,
+description, license, targets`), not the `[package]` table sketched in
+  SPEC §10.1. Layout: `src/main.kark`, `tests/*_test.kark`, `.karkain/cache/`
+  (see `fixtures/project/`). Lockfile `karkain.lock`, auth `~/.karkain/auth.json`.
+- File commands always need a file: bare `run/check/build` in a project dir
+  exit 2 (`No input .kark file specified`). `test <path>` discovers
+  `*_test.kark` and runs `test_*` funcs (`PASS …` + `Test Summary`, exit 0;
+  on Windows the kcc runner may print non-fatal Winsock linker noise).
 - Multi-file units: sibling files in one directory, root file last;
   `import math` + `public func/type/enum` gating (SPEC.md §15).
 - Stdlib modules: `std.string collections io encoding crypto testing numerics

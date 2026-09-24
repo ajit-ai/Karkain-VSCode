@@ -60,6 +60,70 @@ export function candidateExecutableNames(platform: NodeJS.Platform): string[] {
   return ['karkain'];
 }
 
+// Splits a PATH-style variable with the platform delimiter, dropping empties.
+export function splitPathEnv(raw: string | undefined, platform: NodeJS.Platform): string[] {
+  if (!raw) {
+    return [];
+  }
+  const delim = platform === 'win32' ? ';' : ':';
+  return raw
+    .split(delim)
+    .map((s) => s.trim().replace(/^"(.*)"$/, '$1'))
+    .filter((s) => s.length > 0);
+}
+
+// First candidate found on PATH. `exists` is injected (fs.existsSync in the
+// extension, a stub in tests). Returns null when nothing resolves.
+export function resolveOnPath(
+  dirs: string[],
+  names: string[],
+  exists: (p: string) => boolean,
+): string | null {
+  const seen = new Set<string>();
+  for (const dir of dirs) {
+    for (const name of names) {
+      const full = dir.endsWith('/') || dir.endsWith('\\') ? dir + name : `${dir}/${name}`;
+      const key = full.toLowerCase();
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      try {
+        if (exists(full)) {
+          return full;
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+  return null;
+}
+
+// Lists every candidate found (for the toolchain picker), de-duplicated.
+export function listOnPath(dirs: string[], names: string[], exists: (p: string) => boolean): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const dir of dirs) {
+    for (const name of names) {
+      const full = dir.endsWith('/') || dir.endsWith('\\') ? dir + name : `${dir}/${name}`;
+      const key = full.toLowerCase();
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      try {
+        if (exists(full)) {
+          out.push(full);
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+  return out;
+}
+
 // Argument vectors only (never shell strings). Callers must spawn with an
 // argv API such as execFile/spawn and must not concatenate these into a shell.
 export function checkArgs(file: string, jsonFormat: boolean): string[] {
@@ -76,6 +140,10 @@ export function runArgs(file: string): string[] {
 
 export function fmtArgs(file: string): string[] {
   return ['fmt', file];
+}
+
+export function cleanArgs(): string[] {
+  return ['clean'];
 }
 
 export function versionArgs(): string[] {
