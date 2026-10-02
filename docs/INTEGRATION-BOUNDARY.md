@@ -16,10 +16,15 @@ real toolchain.
   the default (kcc) engine renders human text, so the extension attempts the
   default engine first and falls back to a `KARKAIN_ENGINE=go` probe, which
   emits the JSON array (empty + exit 0 on pass, exit 3 with items on failure).
-- Document formatting via in-place `karkain fmt` (verified: rewrites the file,
-  prints `formatted.`/`already formatted.`). The provider saves the buffer,
-  runs `fmt`, then reloads disk content as the edit; dirty-buffer formatting
-  without save is refused rather than misapplied.
+  Both probes are required by the CLI contract (see ARCHITECTURE.md); neither is
+  speculative. Each diagnostic is attributed to the file named by its own `file`
+  field (resolved against the project root when relative), not to the active
+  editor, and uses the schema's optional `endColumn` for a real range.
+- Document formatting is owned by the language server. `karkain lsp` advertises
+  `formattingProvider` and the extension registers no competing
+  `DocumentFormattingEditProvider`; `karkain fmt` is reached through
+  `textDocument/formatting`. Whole-document only, as verified; no range
+  formatting is claimed.
 - `karkain lsp` stdio client (completion/hover/definition/symbols/semantic
   tokens/diagnostics per pkg/lsp ServerCapabilities), verified live 17/17 via
   `scripts/lsp-smoke.mjs`, with a dedicated output channel, 1.1.0 version gate
@@ -55,7 +60,8 @@ real toolchain.
 - LSP rename/references/code actions/workspace symbols (absent from server capabilities).
 - Registry network operations, GPU/NPU/Quantum run-debug, `vscode.dev` support
   (native toolchain processes are desktop-only).
-- Formatter range formatting / selection (only whole-document `fmt` exists).
+- Formatter range formatting / selection (only whole-document formatting exists,
+  and it is served by the language server, not by an extension-side provider).
 
 If an extension feature needs a missing Karkain capability, it is documented
 here first; the Karkain repository is never modified from this project and no

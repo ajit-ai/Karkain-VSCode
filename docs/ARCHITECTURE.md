@@ -61,3 +61,54 @@ formatting, push `publishDiagnostics` with source ranges. Absent server-side
 symbols, inlay hints, code lens, call hierarchy. `scripts/lsp-smoke.mjs`
 (`npm run test:lsp-smoke -- <karkain-bin>`) replays the handshake against a
 real binary; it is a manual gate, not CI, because CI has no toolchain.
+
+## Formatting ownership (single provider)
+
+`karkain lsp` advertises `formattingProvider` (`pkg/lsp/handler.go`), so the
+language client is the **only** formatting provider for `.kark`. The extension
+deliberately registers no `DocumentFormattingEditProvider`: the previous
+extension-side `karkain fmt` provider competed with the server for the same
+operation. `karkain.formatDocument` and `karkain.formatOnSave` both route
+through `editor.action.formatDocument`, which resolves to the language client.
+When no language server is running there is no formatter — no CLI fallback is
+faked. Formatting remains whole-document; range formatting does not exist in
+the toolchain.
+
+## Diagnostics mapping (Phase 1)
+
+`karkain check --format=json` is parsed into `vscode.Diagnostic` objects by the
+pure helpers in `src/diagnostics.ts`:
+
+- **File attribution** — the schema carries a per-diagnostic `file`, and
+  `karkain check` reports per-file spans, so one invocation can describe several
+  files. `resolveDiagnosticFile` resolves each `file` to an absolute path
+  (relative paths against the effective cwd, absolute paths normalized and
+  preserved, blank values falling back to the checked document) and diagnostics
+  are grouped per resolved file. They are never all pinned to the active
+  editor.
+- **Ranges** — `toDiagnosticRange` converts 1-based `line`/`column` to 0-based
+  and uses the schema's optional `endColumn` when it is usable. The schema has
+  no end-line field, so spans never cross a line. Missing, zero, non-numeric or
+  non-advancing `endColumn` values yield a single-position diagnostic rather
+  than an inverted or fabricated range.
+- **Working directory** — `runCheck` uses the same `effectiveCwd` model as every
+  other file command (karkain.toml project root, else workspace folder, else
+  undefined), which also anchors relative diagnostic paths.
+
+## Diagnostic engine probing (compatibility, not redundancy)
+
+Two engines are probed for `check --format=json`, and both are required by the
+Karkain 1.1.0 CLI contract:
+
+- `cmd/karkain/main.go` routes `check` on the default (kcc) engine to
+  `cli.KCCCheckCommand(nil, file, verbose)`, which takes **no format argument**
+  and can only render the human report.
+- The Go backend routes `check` to `cli.CheckCommandFormatted(..., json)`, the
+  only path that writes a schema-v1 JSON array to stdout.
+
+The first probe is therefore the fast path for a toolchain whose default engine
+honours the flag, and the second is what yields structured diagnostics when it
+does not. Removing the first would break a toolchain that honours the flag on
+its default engine; removing the second would leave the extension with no
+structured diagnostics at all. Unparseable output still falls back to the raw
+compiler report in the `Karkain` channel — never fabricated diagnostics.

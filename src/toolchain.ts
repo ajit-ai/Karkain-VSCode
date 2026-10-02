@@ -177,3 +177,34 @@ export function targetArgs(): string[] {
 export function configArgs(): string[] {
   return ['config'];
 }
+
+// Outcome of a `karkain --version` probe, kept pure so the user-facing
+// messaging decision is unit-testable.
+export type ProbeOutcome =
+  | { kind: 'ok'; version: string; raw: string }
+  | { kind: 'unrecognized'; raw: string }
+  | { kind: 'notFound' }
+  | { kind: 'failed'; code: number; detail: string };
+
+// Classifies a version probe. `notFound` is supplied by the caller because
+// only the spawning layer knows whether the executable was missing (spawn
+// ENOENT) as opposed to present but unhappy.
+export function classifyProbe(
+  result: { code: number; stdout: string; stderr: string },
+  notFound: boolean,
+): ProbeOutcome {
+  if (notFound) {
+    return { kind: 'notFound' };
+  }
+  const parsed = parseVersionString(result.stdout);
+  if (parsed) {
+    return { kind: 'ok', version: parsed.version, raw: parsed.raw };
+  }
+  const detail = (result.stderr.trim() || result.stdout.trim()).slice(0, 400);
+  // Exit 0 with unrecognized text means the executable answered but not with a
+  // version banner: distinct from "not installed" and worth saying so.
+  if (result.code === 0) {
+    return { kind: 'unrecognized', raw: detail };
+  }
+  return { kind: 'failed', code: result.code, detail };
+}

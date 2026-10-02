@@ -181,4 +181,96 @@ describe('language assets', () => {
       }
     });
   });
+
+  describe('manifest (package.json)', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let manifest: any;
+    let raw: string;
+
+    before(() => {
+      raw = fs.readFileSync(path.join(repoRoot(), 'package.json'), 'utf8');
+      manifest = JSON.parse(raw);
+    });
+
+    it('declares no duplicate JSON object keys', () => {
+      // A duplicated key is silently dropped by JSON.parse, so the parsed
+      // manifest looks correct while the source is ambiguous. Detect it in the
+      // raw text instead: collect every key occurrence in the contributes
+      // block and assert no name is declared twice at the same level.
+      const hit = /"contributes"\s*:\s*\{/.exec(raw);
+      assert.ok(hit, 'contributes block must exist');
+      // Walk braces to find the end of the contributes object.
+      const start = hit.index + hit[0].length;
+      let depth = 1;
+      let i = start;
+      let inString = false;
+      let escaped = false;
+      for (; i < raw.length && depth > 0; i++) {
+        const ch = raw[i];
+        if (inString) {
+          if (escaped) {
+            escaped = false;
+          } else if (ch === '\\') {
+            escaped = true;
+          } else if (ch === '"') {
+            inString = false;
+          }
+          continue;
+        }
+        if (ch === '"') {
+          inString = true;
+        } else if (ch === '{') {
+          depth++;
+        } else if (ch === '}') {
+          depth--;
+        }
+      }
+      const body = raw.slice(start, i - 1);
+      // Top-level keys are the ones at exactly 4 spaces of indentation.
+      const seen: string[] = [];
+      for (const m of body.matchAll(/^ {4}"([^"]+)"\s*:/gm)) {
+        const key = m[1];
+        assert.ok(!seen.includes(key), `duplicate contributes.${key} declaration`);
+        seen.push(key);
+      }
+      assert.strictEqual(seen.filter((k) => k === 'menus').length, 1, 'exactly one contributes.menus');
+    });
+
+    it('keeps a single menus object with the expected editor/context entries', () => {
+      const context = manifest.contributes.menus['editor/context'];
+      assert.ok(Array.isArray(context), 'editor/context menu must be an array');
+      const commands = context.map((e: { command: string }) => e.command);
+      assert.deepStrictEqual(commands, [
+        'karkain.check',
+        'karkain.build',
+        'karkain.run',
+        'karkain.test',
+        'karkain.debug',
+      ]);
+    });
+
+    it('declares no default formatter (the language server owns formatting)', () => {
+      // The extension registers no formatting provider, so a manifest-level
+      // default would advertise a competing formatter.
+      const karkain = manifest.contributes.configuration.properties;
+      assert.ok(!('karkain.defaultFormatter' in karkain), 'no extension-side default formatter expected');
+      assert.ok(
+        !JSON.stringify(manifest.contributes).includes('defaultFormatter'),
+        'manifest must not declare a defaultFormatter',
+      );
+    });
+
+    it('registers no DocumentFormattingEditProvider in the compiled extension', () => {
+      const compiled = path.join(repoRoot(), 'out', 'extension.js');
+      if (!fs.existsSync(compiled)) {
+        // out/ is produced by `npm run compile`; nothing to assert without it.
+        return;
+      }
+      const js = fs.readFileSync(compiled, 'utf8');
+      assert.ok(
+        !js.includes('registerDocumentFormattingEditProvider'),
+        'formatting must come from the language client only',
+      );
+    });
+  });
 });

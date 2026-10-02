@@ -3,6 +3,7 @@ import {
   buildArgs,
   candidateExecutableNames,
   checkArgs,
+  classifyProbe,
   cleanArgs,
   compareVersions,
   fmtArgs,
@@ -132,6 +133,44 @@ describe('toolchain', () => {
   describe('cleanArgs', () => {
     it('builds the bare project clean', () => {
       assert.deepStrictEqual(cleanArgs(), ['clean']);
+    });
+  });
+
+  describe('classifyProbe', () => {
+    it('reports ok with the parsed version for a real banner', () => {
+      const got = classifyProbe(
+        { code: 0, stdout: 'Karkain Compiler v1.1.0 (windows/amd64, Stable Build)\n', stderr: '' },
+        false,
+      );
+      assert.strictEqual(got.kind, 'ok');
+      assert.strictEqual(got.kind === 'ok' && got.version, '1.1.0');
+    });
+
+    it('distinguishes a missing executable from a found one', () => {
+      // ENOENT: the toolchain is not installed / not on PATH.
+      assert.strictEqual(
+        classifyProbe({ code: -1, stdout: '', stderr: 'spawn karkain ENOENT' }, true).kind,
+        'notFound',
+      );
+    });
+
+    it('distinguishes an unrecognized version banner from not-installed', () => {
+      const got = classifyProbe({ code: 0, stdout: 'hello from some wrapper', stderr: '' }, false);
+      assert.strictEqual(got.kind, 'unrecognized');
+    });
+
+    it('reports a non-zero exit as failed and keeps the detail', () => {
+      const got = classifyProbe({ code: 6, stdout: '', stderr: 'cannot locate src/compiler' }, false);
+      assert.strictEqual(got.kind, 'failed');
+      assert.strictEqual(got.kind === 'failed' && got.code, 6);
+      assert.ok(got.kind === 'failed' && got.detail.includes('src/compiler'));
+    });
+
+    it('prefers the not-found verdict over any output', () => {
+      assert.strictEqual(
+        classifyProbe({ code: 0, stdout: 'Karkain Compiler v1.1.0 (x/y)', stderr: '' }, true).kind,
+        'notFound',
+      );
     });
   });
 });

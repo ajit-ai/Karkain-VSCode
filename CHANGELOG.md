@@ -4,6 +4,56 @@ All notable changes follow Semantic Versioning. The extension stays pre-1.0
 until core language support, diagnostics, build, run, IntelliSense, tests, green
 CI, VSIX packaging, complete docs and understood cross-platform behavior.
 
+## [0.9.1] — 2026-10-02 (Phase 1 integration hardening)
+
+Defect-fix release. No new features; nothing that previously worked was
+removed. Every change below is a verified correctness or packaging fix.
+
+- Manifest: removed the duplicated `contributes.menus` declaration (two
+  byte-identical `editor/context` blocks). A duplicate JSON key is silently
+  dropped by parsers, so the manifest looked correct while the source was
+  ambiguous. Behaviour is unchanged; a new manifest test walks the raw
+  `contributes` text and fails on any duplicated key.
+- Formatting: the Karkain language server advertises `formattingProvider`, so
+  the language client is now the **single** formatting provider. The competing
+  extension-side `karkain fmt` `DocumentFormattingEditProvider` was removed
+  (including its save-then-reload-into-an-edit workaround). No fallback
+  formatter was faked: without a language server there is no formatter, and
+  `Karkain: Format Document` now says so.
+- Diagnostics: each `check --format=json` diagnostic is attributed to the file
+  named by its own `file` field instead of the active editor. Relative paths
+  resolve against the effective Karkain project root, absolute paths are
+  normalized and preserved (Windows drive letters and forward slashes handled),
+  and blank values fall back to the checked document. Multi-file checks no
+  longer misreport another file's error in the open editor.
+- Diagnostics: ranges now use the schema's optional `endColumn`, so
+  span-aware findings are underlined instead of rendered as zero-width markers.
+  Missing, zero, non-numeric or non-advancing end positions stay single-position
+  diagnostics; ranges are never negative, inverted or fabricated. The schema has
+  no end-line field, so spans never cross a line.
+- Diagnostics: `Karkain: Check File` now runs from the same effective working
+  directory as every other file command (the `karkain.toml` project root when
+  detected, else the workspace folder), which also anchors relative diagnostic
+  paths.
+- Tasks: the `karkain` task provider now applies the configured `karkain.target`
+  to `build`/`run`, exactly as the `Build File`/`Run File` commands do. The
+  configured target no longer silently disappears depending on how the user
+  invokes Build. With no target configured the argv is unchanged.
+- Toolchain errors: a missing executable, an unrecognized version banner and a
+  non-zero `--version` exit are now distinguished and each surfaces a
+  user-facing message (previously log-only). Repeated probes on configuration
+  changes notify once per distinct problem instead of on every probe. Logging,
+  manual toolchain selection and the trusted-workspace policy are unchanged.
+- Packaging: `.vscodeignore` now excludes developer-only `docs/`, `fixtures/`
+  and `scripts/` from the VSIX. `templates/` is deliberately still shipped —
+  the README instructs users to copy `templates/launch.json` and
+  `templates/tasks.json` into their own workspace.
+- Retained (investigated, not a defect): the two-engine `check --format=json`
+  probe is a compatibility requirement, not redundancy. `KCCCheckCommand`
+  takes no format argument and cannot emit JSON; only the Go backend's
+  `CheckCommandFormatted(..., json)` writes the schema-v1 array. Both probes are
+  now documented in `docs/ARCHITECTURE.md`.
+
 ## [0.9.0] — 2026-09-24 (Phase 9 release readiness)
 
 - 128×128 extension icon (`images/karkain-icon.png`, generated and

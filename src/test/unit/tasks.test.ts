@@ -1,5 +1,6 @@
 import * as assert from 'assert';
 import { KarkainTaskKind, isFileScoped, taskArgs, taskGroup, taskLabel } from '../../tasks';
+import { applyTarget } from '../../targets';
 
 describe('tasks', () => {
   describe('taskArgs', () => {
@@ -17,6 +18,45 @@ describe('tasks', () => {
       for (const kind of ['build', 'check', 'run'] as KarkainTaskKind[]) {
         assert.throws(() => taskArgs({ kind }), /requires a file/);
       }
+    });
+
+    it('inserts the configured target for build and run, after the verb', () => {
+      assert.deepStrictEqual(taskArgs({ kind: 'build', file: 'a.kark', target: 'wasm32-wasi' }), [
+        'build',
+        '--target',
+        'wasm32-wasi',
+        'a.kark',
+      ]);
+      assert.deepStrictEqual(taskArgs({ kind: 'run', file: 'a.kark', target: 'c23' }), [
+        'run',
+        '--target',
+        'c23',
+        'a.kark',
+      ]);
+    });
+
+    it('leaves argv byte-identical when no target is configured', () => {
+      assert.deepStrictEqual(taskArgs({ kind: 'build', file: 'a.kark' }), ['build', 'a.kark']);
+      assert.deepStrictEqual(taskArgs({ kind: 'build', file: 'a.kark', target: '' }), ['build', 'a.kark']);
+      assert.deepStrictEqual(taskArgs({ kind: 'run', file: 'a.kark', target: '  ' }), ['run', 'a.kark']);
+    });
+
+    it('does not apply a target to check or clean', () => {
+      assert.deepStrictEqual(taskArgs({ kind: 'check', file: 'a.kark', target: 'wasm32-wasi' }), [
+        'check',
+        'a.kark',
+      ]);
+      assert.deepStrictEqual(taskArgs({ kind: 'clean', cwd: '/p', target: 'wasm32-wasi' }), ['clean']);
+    });
+
+    it('matches the command build path exactly (task and command agree)', () => {
+      // The Build File command builds argv with applyTarget(buildArgs(file), t);
+      // the task must produce the same vector so the target cannot disappear.
+      const target = 'native-x86_64-linux';
+      assert.deepStrictEqual(
+        taskArgs({ kind: 'build', file: 'a.kark', target }),
+        applyTarget(['build', 'a.kark'], target),
+      );
     });
   });
 

@@ -14,13 +14,12 @@ import {
   buildArgs,
   candidateExecutableNames,
   checkArgs,
+  classifyProbe,
   cleanArgs,
   compareVersions,
   configArgs,
-  fmtArgs,
   isKarkFile,
   listOnPath,
-  parseVersionString,
   quoteTerminalArg,
   resolveOnPath,
   runArgs,
@@ -29,7 +28,13 @@ import {
   targetArgs,
   versionArgs,
 } from './toolchain';
-import { KarkainDiagnostic, KarkainSeverity, tryParseCheckJson } from './diagnostics';
+import {
+  KarkainDiagnostic,
+  KarkainSeverity,
+  resolveDiagnosticFile,
+  toDiagnosticRange,
+  tryParseCheckJson,
+} from './diagnostics';
 import { KARKAIN_LANGUAGE_SERVER_ID, MIN_LANGUAGE_SERVER_VERSION } from './lsp';
 import { findProjectRoot } from './project';
 import { KarkainTaskKind, isFileScoped, taskArgs, taskGroup, taskLabel } from './tasks';
@@ -64,41 +69,82 @@ function log(msg: string): void {
   channel?.appendLine(msg);
 }
 
-function execTool(args: string[], cwd?: string): Promise<{ code: number; stdout: string; stderr: string }> {
+interface ExecResult {
+  code: number;
+  stdout: string;
+  stderr: string;
+  /** True when the executable itself could not be spawned (ENOENT). */
+  notFound: boolean;
+}
+
+function execTool(args: string[], cwd?: string): Promise<ExecResult> {
   return new Promise((resolve) => {
     execFile(getCompilerPath(), args, { encoding: 'utf8', cwd, timeout: 120000 }, (err, stdout, stderr) => {
-      const execErr = err as { code?: unknown };
-      const code = err && typeof execErr.code === 'number' ? (execErr.code as number) : -1;
-      resolve({ code, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') });
+      const execErr = err as { code?: unknown } | null;
+      const notFound = !!execErr && typeof execErr.code === 'string' && execErr.code === 'ENOENT';
+      const code = execErr && typeof execErr.code === 'number' ? (execErr.code as number) : execErr ? -1 : 0;
+      resolve({
+        code,
+        stdout: String(stdout ?? ''),
+        stderr: String(stderr ?? ''),
+        notFound,
+      });
     });
   });
 }
 
+// One notification per distinct problem kind per session, so re-probing on
+// configuration changes never spams the user.
+const notifiedProbeIssues = new Set<string>();
+
+function notifyProbeIssue(key: string, message: string): void {
+  if (notifiedProbeIssues.has(key)) {
+    return;
+  }
+  notifiedProbeIssues.add(key);
+  void vscode.window.showWarningMessage(message);
+}
+
 async function probeToolchain(): Promise<void> {
   detectedVersion = undefined;
-  try {
-    const r = await execTool(versionArgs());
-    const parsed = parseVersionString(r.stdout);
-    if (parsed) {
-      detectedVersion = parsed.version;
-      const lspOk = compareVersions(parsed.version, MIN_LANGUAGE_SERVER_VERSION) >= 0;
-      log(
-        `Karkain toolchain: ${parsed.raw} (structured diagnostics: ${supportsStructuredDiagnostics(parsed.version) ? 'yes' : 'requires >= 1.1.0'}; language server: ${lspOk ? 'supported' : `expects >= ${MIN_LANGUAGE_SERVER_VERSION}`})`,
-      );
-      if (!lspOk) {
-        void vscode.window.showWarningMessage(
-          `Karkain: language intelligence is verified against ${MIN_LANGUAGE_SERVER_VERSION}+ (detected ${parsed.version}).`,
-        );
-      }
-    } else if (r.code === 0) {
-      log(`Karkain toolchain responded with unrecognized version output: ${r.stdout.trim()}`);
-    } else {
-      log(`Karkain toolchain probe failed (exit ${r.code}): ${r.stderr.trim() || r.stdout.trim()}`);
-    }
-  } catch (e) {
+  const result = await execTool(versionArgs());
+  const outcome = classifyProbe(result, result.notFound);
+  if (outcome.kind === 'ok') {
+    notifiedProbeIssues.clear();
+    detectedVersion = outcome.version;
+    const lspOk = compareVersions(outcome.version, MIN_LANGUAGE_SERVER_VERSION) >= 0;
     log(
-      `Karkain executable not found: ${(e as Error).message}. Set karkain.compilerPath or add karkain to PATH.`,
+      `Karkain toolchain: ${outcome.raw} (structured diagnostics: ${supportsStructuredDiagnostics(outcome.version) ? 'yes' : 'requires >= 1.1.0'}; language server: ${lspOk ? 'supported' : `expects >= ${MIN_LANGUAGE_SERVER_VERSION}`})`,
     );
+    if (!lspOk) {
+      void vscode.window.showWarningMessage(
+        `Karkain: language intelligence is verified against ${MIN_LANGUAGE_SERVER_VERSION}+ (detected ${outcome.version}).`,
+      );
+    }
+    return;
+  }
+  switch (outcome.kind) {
+    case 'notFound':
+      log(`Karkain executable not found: ${result.stderr}. Set karkain.compilerPath or add karkain to PATH.`);
+      notifyProbeIssue(
+        'not-found',
+        'Karkain: no karkain executable found. Install the Karkain toolchain, add it to PATH, or set karkain.compilerPath.',
+      );
+      break;
+    case 'unrecognized':
+      log(`Karkain toolchain responded with unrecognized version output: ${outcome.raw}`);
+      notifyProbeIssue(
+        'unrecognized',
+        'Karkain: the karkain executable was found but its version could not be detected. Check karkain.compilerPath.',
+      );
+      break;
+    case 'failed':
+      log(`Karkain toolchain probe failed (exit ${outcome.code}): ${outcome.detail}`);
+      notifyProbeIssue(
+        `failed:${outcome.code}`,
+        `Karkain: karkain --version failed (exit ${outcome.code}). See the Karkain output channel.`,
+      );
+      break;
   }
 }
 
@@ -235,7 +281,9 @@ function resolveTaskDefinition(
   const kind = definition.task;
   let args: string[];
   try {
-    args = taskArgs({ kind, file: definition.file });
+    // The configured target is applied here, exactly as the Build File/Run File
+    // commands apply it, so the task and the command cannot disagree.
+    args = taskArgs({ kind, file: definition.file, target: getTarget() });
   } catch {
     return undefined;
   }
@@ -288,7 +336,10 @@ function spawnCheck(
 
 async function runCheck(doc: vscode.TextDocument): Promise<void> {
   const file = doc.uri.fsPath;
-  const folder = vscode.workspace.getWorkspaceFolder(doc.uri)?.uri.fsPath;
+  // Same effective-cwd model as every other file command: the karkain.toml
+  // project root when the file lives in a project, else the workspace folder,
+  // else undefined. This also anchors relative diagnostic `file` paths.
+  const folder = effectiveCwd(file);
   const useJson =
     detectedVersion === undefined || detectedVersion === '' || supportsStructuredDiagnostics(detectedVersion);
   if (!useJson) {
@@ -296,8 +347,18 @@ async function runCheck(doc: vscode.TextDocument): Promise<void> {
       'Karkain: structured diagnostics require Karkain 1.1.0+. Raw compiler output was written to the Karkain channel.',
     );
   }
-  // Attempt 1: default engine. Attempt 2 (verified contract): the Go engine,
-  // which is the only path emitting schema-v1 JSON today.
+  // Two engines are probed on purpose and this is a compatibility contract,
+  // not redundancy (verified against the Karkain 1.1.0 source):
+  //   * cmd/karkain/main.go dispatches `check` on the default (kcc) engine to
+  //     cli.KCCCheckCommand(nil, file, verbose), which takes no format
+  //     argument and can only render the human report.
+  //   * The Go backend dispatches to cli.CheckCommandFormatted(..., json),
+  //     which is the only path that writes a schema-v1 JSON array to stdout.
+  // So the first probe is the fast path for a toolchain that does honour the
+  // flag, and the second is what actually yields structured diagnostics for
+  // the default engine. Removing the first would break any Karkain build whose
+  // default engine does support `--format=json`; removing the second would
+  // leave the extension with no structured diagnostics at all.
   const attempts: { label: string; env: NodeJS.ProcessEnv }[] = useJson
     ? [
         { label: 'default', env: {} },
@@ -319,7 +380,7 @@ async function runCheck(doc: vscode.TextDocument): Promise<void> {
     if (parsed !== null) {
       result = r;
       usedEngine = attempt.label;
-      reportCheck(doc, file, r, parsed);
+      reportCheck(doc, file, folder, r, parsed);
       return;
     }
     result = r;
@@ -345,6 +406,7 @@ async function runCheck(doc: vscode.TextDocument): Promise<void> {
 function reportCheck(
   doc: vscode.TextDocument,
   file: string,
+  cwd: string | undefined,
   result: CheckSpawn,
   parsed: KarkainDiagnostic[],
 ): void {
@@ -361,22 +423,39 @@ function reportCheck(
     }
     return;
   }
-  const diags = parsed.map((d) => {
-    const range = new vscode.Range(
-      Math.max(0, d.line - 1),
-      Math.max(0, d.column - 1),
-      Math.max(0, d.line - 1),
-      Math.max(0, d.column - 1),
+  // `karkain check` reports per-file spans, so one invocation can describe
+  // several files. Group by the diagnostic's own `file` instead of pinning
+  // everything to the active document, which would attribute another file's
+  // error to the file the user happens to have open.
+  const byFile = new Map<string, vscode.Diagnostic[]>();
+  for (const d of parsed) {
+    const resolved = resolveDiagnosticFile(d.file, cwd, file);
+    const r = toDiagnosticRange(d);
+    const diag = new vscode.Diagnostic(
+      new vscode.Range(r.startLine, r.startCharacter, r.endLine, r.endCharacter),
+      d.message,
+      toVscodeSeverity(d.severity),
     );
-    const diag = new vscode.Diagnostic(range, d.message, toVscodeSeverity(d.severity));
     diag.source = 'karkain';
     if (d.code) {
       diag.code = d.code;
     }
-    return diag;
-  });
-  problems?.set(uri, diags);
-  vscode.window.setStatusBarMessage(`Karkain: ${diags.length} problem(s)`, 5000);
+    const bucket = byFile.get(resolved);
+    if (bucket) {
+      bucket.push(diag);
+    } else {
+      byFile.set(resolved, [diag]);
+    }
+  }
+  for (const [target, diags] of byFile) {
+    problems?.set(vscode.Uri.file(target), diags);
+  }
+  const total = parsed.length;
+  const files = byFile.size;
+  vscode.window.setStatusBarMessage(
+    files > 1 ? `Karkain: ${total} problem(s) in ${files} file(s)` : `Karkain: ${total} problem(s)`,
+    5000,
+  );
 }
 
 function testItemId(uri: vscode.Uri, name: string): string {
@@ -811,9 +890,19 @@ export function activate(context: vscode.ExtensionContext): void {
       await probeToolchain();
     }),
     vscode.commands.registerCommand('karkain.formatDocument', () => {
-      if (vscode.window.activeTextEditor) {
-        void vscode.commands.executeCommand('editor.action.formatDocument');
+      const doc = vscode.window.activeTextEditor?.document;
+      if (!doc) {
+        return;
       }
+      if (!client) {
+        // The language server is the only formatting provider; say so instead
+        // of silently doing nothing.
+        void vscode.window.showWarningMessage(
+          'Karkain: formatting requires the Karkain language server, which is not running. See the Karkain Language Server output channel.',
+        );
+        return;
+      }
+      void vscode.commands.executeCommand('editor.action.formatDocument');
     }),
     vscode.commands.registerCommand('karkain.selectTarget', async () => {
       const peer = await execTool(targetArgs(), vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
@@ -917,59 +1006,13 @@ export function activate(context: vscode.ExtensionContext): void {
         return resolveTaskDefinition({ type: 'karkain', task: kind, file: def.file }, scopeFolder, undefined);
       },
     }),
-    vscode.languages.registerDocumentFormattingEditProvider('karkain', {
-      // `karkain fmt` rewrites the file in place (verified on 1.1.0) and only
-      // prints a status line, so the provider saves the buffer, formats, then
-      // reloads the disk content as the edit. A dirty buffer that cannot be
-      // saved is refused rather than formatted against stale disk content.
-      provideDocumentFormattingEdits(document, _options, token) {
-        return (async (): Promise<vscode.TextEdit[] | null> => {
-          if (document.isDirty) {
-            const saved = await document.save();
-            if (!saved) {
-              void vscode.window.showErrorMessage('Karkain: save the file before formatting.');
-              return null;
-            }
-          }
-          const r = await new Promise<{ code: number | null; stderr: string }>((resolve) => {
-            const proc = spawn(getCompilerPath(), fmtArgs(document.uri.fsPath));
-            let stderr = '';
-            proc.stderr.on('data', (d) => {
-              stderr += String(d);
-            });
-            const subscription = token.onCancellationRequested(() => proc.kill());
-            proc.on('error', (err) => {
-              subscription.dispose();
-              resolve({ code: null, stderr: err.message });
-            });
-            proc.on('close', (code) => {
-              subscription.dispose();
-              resolve({ code, stderr });
-            });
-          });
-          if (token.isCancellationRequested || r.code === null) {
-            return null;
-          }
-          if (r.code !== 0) {
-            log(`karkain fmt failed for ${document.uri.fsPath} (exit ${r.code}):\n${r.stderr}`);
-            void vscode.window.showErrorMessage(
-              'Karkain: formatter failed (requires Karkain 1.1.0+). See the Karkain output channel.',
-            );
-            return null;
-          }
-          const disk = Buffer.from(await vscode.workspace.fs.readFile(document.uri)).toString('utf8');
-          if (disk === document.getText()) {
-            return [];
-          }
-          return [
-            vscode.TextEdit.replace(
-              new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)),
-              disk,
-            ),
-          ];
-        })();
-      },
-    }),
+    // Formatting is intentionally NOT registered here. `karkain lsp`
+    // advertises `formattingProvider` (pkg/lsp/handler.go), so the language
+    // client is the single authoritative formatting provider and `karkain fmt`
+    // is reached through the server's textDocument/formatting request. An
+    // extension-side `karkain fmt` provider used to compete with it; removing
+    // it leaves exactly one provider for the operation. No fallback formatter
+    // is faked: with no language server there is simply no formatter.
   );
 
   // Guarded so the post-format save below cannot re-enter the handler.

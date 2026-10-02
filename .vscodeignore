@@ -12,3 +12,12 @@ vss-extension.json
 **/*.map
 **/*.ts
 out/test/**
+# Developer-only content, not required at runtime and not shipped to users:
+#   docs/      internal process/inspection docs (linked from the GitHub repo)
+#   fixtures/  real .kark programs used only by the manual smoke gates
+#   scripts/   manual lsp-smoke / toolchain-smoke gates (need a real toolchain)
+docs/**
+fixtures/**
+scripts/**
+# templates/ is intentionally shipped: the README tells users to copy
+# templates/launch.json and templates/tasks.json into their own workspace.

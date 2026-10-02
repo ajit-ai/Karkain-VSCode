@@ -21,7 +21,7 @@ formatter, test runner and language server live in the Karkain repository.
 ```sh
 npm install
 npm run package
-code --install-extension karkain-0.9.0.vsix
+code --install-extension karkain-0.9.1.vsix
 ```
 
 Release builds are attached to GitHub Releases (see `docs/RELEASE.md`); the
@@ -72,7 +72,9 @@ empty = host default).
 
 ## Known limitations (Phase 9)
 
-- `karkain fmt` whole-document formatting requires Karkain 1.1.0+.
+- `karkain fmt` whole-document formatting requires Karkain 1.1.0+ and is served
+  by the language server (`karkain lsp`), the only registered formatting
+  provider; with no language server there is no formatter.
 - Semantic features follow the server: rename, references, code actions and
   workspace symbols are absent from `karkain lsp` and are not faked.
 - GPU/NPU/Quantum targets are model-only or research-grade per the toolchain;
