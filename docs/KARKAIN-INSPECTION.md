@@ -10,7 +10,13 @@ is recorded at the bottom; the extension targets **1.1.0**.
 - Source extension: `.kark` (verified: `ValidateKarFile`, `examples/*.kark`).
 - Entry point: `func main()`. Minimal program (`examples/01-fundamentals/01_hello_world.kark`):
   `func main() { print("Hello, Karkain!") }`.
-- Line comments `//` only; no block comments in the lexer (SPEC.md §1.3).
+- Comments: `//` line comments and `/* ... */` block comments, both present in
+  the released 1.1.0 lexer (`pkg/lexer/lexer.go`, Phase 112 — nested block
+  comments with depth tracking). SPEC.md §1.3 still says block comments are
+  undefined; that spec text is stale and the lexer supersedes it.
+  The extension's TextMate grammar highlights the ordinary begin/end form
+  (`comment.block.karkain`); TextMate cannot model arbitrary recursive
+  nesting, so a nested block comment ends at its first `*/`.
 - Authoritative keywords (SPEC.md §1.2 + Appendix A): `func fn print println let
 var return if else import matrix alloc free addr qreg gate measure actor spawn
 receive channel send macro quote unquote comptime while for type struct bool

@@ -190,6 +190,35 @@ describe('language assets', () => {
       assert.deepStrictEqual(unscoped, [], `keywords with no keyword rule: ${unscoped.join(', ')}`);
     });
 
+    it('supports released Karkain block comments', () => {
+      // Karkain 1.1.0 lexes /* ... */ (nested); the grammar highlights the
+      // ordinary begin/end form. Asserted per-rule, not by searching the file,
+      // so a deleted or renamed rule fails here.
+      const rule = grammar.repository.blockComment;
+      assert.ok(rule, 'blockComment rule missing');
+      assert.strictEqual(rule.name, 'comment.block.karkain');
+      assert.strictEqual(rule.begin, '/\\*');
+      assert.strictEqual(rule.end, '\\*/');
+      assert.ok(new RegExp(rule.begin).test('/* text'), 'begin must match an opening /*');
+      assert.ok(new RegExp(rule.end).test('text */'), 'end must match a closing */');
+      // Must not swallow line comments or bare division.
+      assert.ok(!new RegExp(rule.begin).test('// line'), 'begin must not match //');
+      assert.ok(!new RegExp(rule.begin).test('a / b'), 'begin must not match division');
+      // begin/end (not a single-line `match`) is what gives multiline support.
+      assert.strictEqual(rule.match, undefined, 'block comment needs begin/end, not match');
+    });
+
+    it('orders the block comment rule ahead of the operator rule', () => {
+      // Otherwise `/` and `*` are tokenized as operators before the comment
+      // rule can claim them, and block comments render as operators.
+      const order = (grammar.patterns as { include: string }[]).map((p) => p.include);
+      const block = order.indexOf('#blockComment');
+      const operator = order.indexOf('#operator');
+      assert.ok(block !== -1, '#blockComment must be included in top-level patterns');
+      assert.ok(operator !== -1, '#operator must be included in top-level patterns');
+      assert.ok(block < operator, `#blockComment (${block}) must precede #operator (${operator})`);
+    });
+
     it('keeps comment/string/identifier rules', () => {
       assert.ok(grammar.repository.comment, 'comment rule missing');
       assert.ok(grammar.repository.string, 'string rule missing');
@@ -245,6 +274,12 @@ describe('language assets', () => {
       const word = new RegExp(`^(?:${config.wordPattern})$`);
       assert.ok(word.test('my_var1'), 'wordPattern must match identifiers');
       assert.ok(!word.test('9lives'), 'wordPattern must reject leading digits');
+    });
+
+    it('declares both Karkain comment forms', () => {
+      // Toggle Comment and Toggle Block Comment both need these; Karkain 1.1.0
+      // supports /* ... */ as well as //.
+      assert.deepStrictEqual(config.comments.blockComment, ['/*', '*/']);
     });
 
     it('compiles indentation and onEnter rules', () => {

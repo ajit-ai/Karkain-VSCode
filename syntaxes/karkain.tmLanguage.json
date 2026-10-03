@@ -6,6 +6,9 @@
       "include": "#comment"
     },
     {
+      "include": "#blockComment"
+    },
+    {
       "include": "#string"
     },
     {
@@ -37,6 +40,11 @@
     "comment": {
       "match": "//.*$",
       "name": "comment.line.double-slash.karkain"
+    },
+    "blockComment": {
+      "begin": "/\\*",
+      "end": "\\*/",
+      "name": "comment.block.karkain"
     },
     "string": {
       "begin": "\"",
