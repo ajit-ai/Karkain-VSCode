@@ -60,6 +60,41 @@ export function isSupportedServer(info: LspServerInfo | undefined | null): boole
   return v !== null && compareVersions(v, MIN_LANGUAGE_SERVER_VERSION) >= 0;
 }
 
+/**
+ * Outcome of validating a live server against the required capability set.
+ * `serverName`/`serverVersion` are reported for diagnostics only; they are NOT
+ * used as a version gate (that is deliberately separate).
+ */
+export interface CapabilityNegotiation {
+  /** Required capabilities the server did not advertise. */
+  missing: string[];
+  /** True when nothing required is missing. */
+  compatible: boolean;
+  serverName?: string;
+  serverVersion?: string;
+}
+
+/**
+ * Production entry point, called once the client has finished initialize and
+ * therefore holds the real InitializeResult the server returned. Nothing here
+ * fabricates a result: an absent one is treated as "nothing advertised", which
+ * `findMissingCapabilities` already handles honestly.
+ *
+ * Deliberately does NOT gate on serverInfo.version — version gating is a
+ * separate concern from capability negotiation.
+ */
+export function negotiateServerCapabilities(
+  result: LspInitializeResult | undefined | null,
+): CapabilityNegotiation {
+  const missing = findMissingCapabilities(result?.capabilities);
+  return {
+    missing,
+    compatible: missing.length === 0,
+    serverName: result?.serverInfo?.name,
+    serverVersion: result?.serverInfo?.version,
+  };
+}
+
 // LSP 3.17 SymbolKind names, mirroring pkg/lsp/protocol.go SymbolKind* consts.
 const SYMBOL_KINDS: Record<number, string> = {
   1: 'File',

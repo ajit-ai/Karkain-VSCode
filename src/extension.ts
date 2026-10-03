@@ -35,7 +35,12 @@ import {
   toVscodeSeverityLevel,
   tryParseCheckJson,
 } from './diagnostics';
-import { KARKAIN_LANGUAGE_SERVER_ID, MIN_LANGUAGE_SERVER_VERSION } from './lsp';
+import {
+  KARKAIN_LANGUAGE_SERVER_ID,
+  LspInitializeResult,
+  MIN_LANGUAGE_SERVER_VERSION,
+  negotiateServerCapabilities,
+} from './lsp';
 import { findProjectRoot } from './project';
 import { KarkainTaskKind, isFileScoped, taskArgs, taskGroup, taskLabel } from './tasks';
 import {
@@ -162,7 +167,26 @@ async function probeToolchain(): Promise<void> {
   }
 }
 
-function startLanguageClient(context: vscode.ExtensionContext): void {
+// Validates the capabilities of the server that actually came up, using the
+// real InitializeResult the client holds after initialize. Reports honestly but
+// never stops a working server: a missing capability degrades the feature, it
+// does not make the language server unusable.
+export function reportServerCapabilities(result: unknown): void {
+  const negotiation = negotiateServerCapabilities(result as LspInitializeResult | undefined);
+  const who = negotiation.serverName ?? 'karkain-lsp';
+  if (negotiation.compatible) {
+    log(`Karkain language server ready (${who} ${negotiation.serverVersion ?? ''}).`.trim());
+    return;
+  }
+  log(
+    `Karkain language server initialized with a reduced feature set; missing: ${negotiation.missing.join(', ')}. Affected features stay unavailable; the server is still used.`,
+  );
+  void vscode.window.showWarningMessage(
+    `Karkain: the language server did not advertise ${negotiation.missing.join(', ')}. Those features are unavailable. See the Karkain Language Server output channel.`,
+  );
+}
+
+async function startLanguageClient(context: vscode.ExtensionContext): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   let lc: any;
   try {
@@ -187,14 +211,36 @@ function startLanguageClient(context: vscode.ExtensionContext): void {
       return false;
     },
   };
-  client = new lc.LanguageClient(
+  const next = new lc.LanguageClient(
     KARKAIN_LANGUAGE_SERVER_ID,
     'Karkain Language Server',
     serverOptions,
     clientOptions,
   );
-  context.subscriptions.push(client.start());
+  // Publish the handle before starting so deactivate() and restart always see
+  // a live client, never a half-built one.
+  client = next;
+  try {
+    // v9 start() resolves once initialize has completed, which is the only
+    // point at which initializeResult is meaningful.
+    await next.start();
+  } catch (e) {
+    // Never leave a stale handle behind for deactivate() to try to stop.
+    if (client === next) {
+      client = null;
+    }
+    log(`Karkain language client failed to start: ${(e as Error).message}`);
+    return;
+  }
+  // start() resolves to a promise, not a disposable, so register a real
+  // disposable instead of pushing the promise (which has no dispose()).
+  context.subscriptions.push({
+    dispose: () => {
+      void next.stop();
+    },
+  });
   log('Karkain language client started (`karkain lsp` over stdio).');
+  reportServerCapabilities(next.initializeResult);
 }
 
 async function restartLanguageClient(): Promise<void> {
@@ -760,19 +806,25 @@ async function runDebug(): Promise<void> {
 }
 
 /**
- * The extension's public API. Currently a single test-only seam.
+ * The extension's public API. A minimal test-only seam, deliberately the
+ * *entire* exported surface rather than a DI container.
  *
- * This is deliberately the *entire* exported surface rather than a DI
- * container: removing it would leave the extension-host suite with no way to
- * substitute the toolchain, and the only alternatives are a bespoke injection
- * framework (more production surface than the seam it replaces) or requiring a
- * real `karkain` on PATH (which would make the activation tests
- * environment-dependent). It costs one exported symbol and keeps every
- * production code path free of test knowledge.
+ * Removing it would leave the extension-host suite with no way to substitute
+ * the toolchain or drive capability negotiation, and the only alternatives are a
+ * bespoke injection framework (more production surface than the seam it
+ * replaces) or requiring a real `karkain` on PATH (which would make the
+ * activation tests environment-dependent). It keeps every production code path
+ * free of test knowledge.
  */
 export interface KarkainExtensionApi {
   /** Replaces the process seam. Intended for tests; production never calls this. */
   setToolchainService(service: ToolchainService): void;
+  /**
+   * Validates a real InitializeResult against the required capability set and
+   * reports any degradation. Exposed so the extension-host suite can assert the
+   * production negotiation path without standing up a real `karkain lsp`.
+   */
+  reportServerCapabilities(result: unknown): void;
 }
 
 export function activate(context: vscode.ExtensionContext): KarkainExtensionApi {
@@ -800,7 +852,8 @@ export function activate(context: vscode.ExtensionContext): KarkainExtensionApi 
   context.subscriptions.push(testRunProfile);
   log(`Karkain for Visual Studio Code ${context.extension.packageJSON.version as string} activated.`);
   void probeToolchain();
-  startLanguageClient(context);
+  // Fire-and-forget: activation must not block on the language server.
+  void startLanguageClient(context);
   void refreshAllTests();
 
   context.subscriptions.push(
@@ -969,7 +1022,8 @@ export function activate(context: vscode.ExtensionContext): KarkainExtensionApi 
     }),
     vscode.commands.registerCommand('karkain.restartLanguageServer', async () => {
       await restartLanguageClient();
-      startLanguageClient(context);
+      // Awaited so a stop can never race the next start.
+      await startLanguageClient(context);
       vscode.window.setStatusBarMessage('Karkain: language server restarted', 3000);
     }),
     vscode.tasks.registerTaskProvider('karkain', {
@@ -1064,7 +1118,7 @@ export function activate(context: vscode.ExtensionContext): KarkainExtensionApi 
       testController?.items.delete(uri.toString());
     }),
   );
-  return { setToolchainService };
+  return { setToolchainService, reportServerCapabilities };
 }
 
 export function deactivate(): Thenable<void> | undefined {

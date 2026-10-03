@@ -16,6 +16,7 @@ const EXTENSION_ID = 'karkain.karkain';
 
 interface KarkainExtensionApi {
   setToolchainService(service: unknown): void;
+  reportServerCapabilities(result: unknown): void;
 }
 
 /** Every command the manifest contributes. */
@@ -109,5 +110,34 @@ suite('extension activation', () => {
       fake.argvLog().includes('target'),
       `expected a target probe, saw: ${JSON.stringify(fake.argvLog())}`,
     );
+  });
+
+  test('negotiates capabilities from a real InitializeResult', async () => {
+    // Drives the production negotiation entry point with the shape the Karkain
+    // server actually returns. A full-featured server must be accepted.
+    const ext = await activate();
+    const compatible = {
+      capabilities: {
+        textDocumentSync: { openClose: true, change: 1 },
+        completionProvider: { triggerCharacters: ['.', ':'] },
+        semanticTokensProvider: { legend: { tokenTypes: [], tokenModifiers: [] }, full: true },
+        hoverProvider: true,
+        definitionProvider: true,
+        documentSymbolProvider: true,
+        formattingProvider: true,
+      },
+      serverInfo: { name: 'karkain-lsp', version: '1.1.0' },
+    };
+    assert.doesNotThrow(() => ext.exports.reportServerCapabilities(compatible));
+
+    // A degraded server must still be handled (reported), never thrown or fatal.
+    const degraded = {
+      capabilities: { ...compatible.capabilities, hoverProvider: false, formattingProvider: false },
+      serverInfo: { name: 'karkain-lsp', version: '1.1.0' },
+    };
+    assert.doesNotThrow(() => ext.exports.reportServerCapabilities(degraded));
+
+    // An absent result is degraded, not a crash.
+    assert.doesNotThrow(() => ext.exports.reportServerCapabilities(undefined));
   });
 });
