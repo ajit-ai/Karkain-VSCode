@@ -88,6 +88,27 @@ function collectRegexSources(node: unknown, into: string[]): void {
   }
 }
 
+// The intended TextMate scope of each keyword rule, in grammar order. Taken from
+// the grammar as it stands (SPEC §1.2 keyword taxonomy); the keyword words are
+// NOT listed here — they are derived from each rule's own alternation and
+// cross-checked against SPEC_WORDS, so the two lists cannot drift apart.
+const EXPECTED_KEYWORD_SCOPES = [
+  'keyword.control.karkain',
+  'support.function.builtin.karkain',
+  'constant.language.boolean.karkain',
+  'constant.language.karkain',
+  'support.type.primitive.karkain',
+  'keyword.other.karkain',
+];
+
+// Extracts the alternatives of a keyword rule shaped like `\b(a|b|c)\b`.
+// Returns an empty array for any other shape, which the caller treats as a
+// failure rather than silently ignoring the rule.
+function alternationWords(match: string): string[] {
+  const m = /^\s*\\b\((.+)\)\\b\s*$/.exec(match);
+  return m ? m[1].split('|') : [];
+}
+
 describe('language assets', () => {
   describe('grammar (syntaxes/karkain.tmLanguage.json)', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -127,6 +148,46 @@ describe('language assets', () => {
         .filter((re) => !re.test(''));
       const missing = SPEC_WORDS.filter((w) => !regexes.some((re) => re.test(w)));
       assert.deepStrictEqual(missing, [], `words without grammar coverage: ${missing.join(', ')}`);
+    });
+
+    it('assigns every keyword the intended TextMate scope', () => {
+      // Matching a keyword is not enough: a rule can match and still highlight
+      // it with the wrong colour if its scope is wrong. Each keyword rule is
+      // therefore checked for its own scope, and every SPEC word is resolved
+      // through the rule that actually claims it — so a scope changed to an
+      // unrelated one fails here instead of passing silently.
+      const patterns = grammar.repository.keyword.patterns as {
+        match: string;
+        name: string;
+      }[];
+      assert.strictEqual(
+        patterns.length,
+        EXPECTED_KEYWORD_SCOPES.length,
+        'keyword rule count changed; update EXPECTED_KEYWORD_SCOPES deliberately',
+      );
+
+      const scopeByWord = new Map<string, string>();
+      patterns.forEach((pattern, i) => {
+        assert.strictEqual(
+          pattern.name,
+          EXPECTED_KEYWORD_SCOPES[i],
+          `keyword rule ${i} must use scope ${EXPECTED_KEYWORD_SCOPES[i]}, got ${pattern.name}`,
+        );
+        const words = alternationWords(pattern.match);
+        assert.ok(words.length > 0, `keyword rule ${i} has no \b(...)\b alternation to verify`);
+        for (const word of words) {
+          assert.ok(
+            !scopeByWord.has(word),
+            `keyword "${word}" is claimed by both ${scopeByWord.get(word)} and ${pattern.name}`,
+          );
+          scopeByWord.set(word, pattern.name);
+        }
+      });
+
+      // Every asserted keyword must be resolved through a keyword rule, so the
+      // scope check above is genuinely reachable for all of SPEC_WORDS.
+      const unscoped = SPEC_WORDS.filter((w) => !scopeByWord.has(w));
+      assert.deepStrictEqual(unscoped, [], `keywords with no keyword rule: ${unscoped.join(', ')}`);
     });
 
     it('keeps comment/string/identifier rules', () => {
