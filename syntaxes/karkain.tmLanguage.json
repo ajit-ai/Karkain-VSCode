@@ -70,7 +70,7 @@
     "keyword": {
       "patterns": [
         {
-          "match": "\\b(func|fn|let|var|if|else|while|for|in|return|break|continue|match|import|type|struct|enum|matrix|macro|quote|unquote|comptime|public|linear|packed)\\b",
+          "match": "\\b(func|fn|let|var|const|if|else|while|for|in|return|break|continue|match|import|type|struct|enum|matrix|macro|quote|unquote|comptime|public|linear|packed)\\b",
           "name": "keyword.control.karkain"
         },
         {

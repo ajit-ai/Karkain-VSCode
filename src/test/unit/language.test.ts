@@ -10,6 +10,9 @@ const SPEC_WORDS = [
   'println',
   'let',
   'var',
+  // `const` is a reserved lexer keyword (pkg/lexer/lexer.go -> TokenConst);
+  // asserted here so it cannot silently drop out of the grammar again.
+  'const',
   'return',
   'if',
   'else',
@@ -111,7 +114,17 @@ describe('language assets', () => {
     });
 
     it('covers every SPEC §1.2 word', () => {
-      const regexes = sources.map((s) => new RegExp(s));
+      // Only rules that actually consume characters count as coverage. Two
+      // kinds of rule would otherwise match every word and make this assertion
+      // vacuous: the generic identifier rule (`\b[a-zA-Z_]\w*\b`), and the
+      // zero-width `end` lookaheads (e.g. `(?=\{|$)`), which match the empty
+      // string. Excluding both is what makes a removed keyword — such as
+      // `const` — fail this test instead of silently passing.
+      const identifier = grammar.repository.identifier?.match;
+      const regexes = sources
+        .filter((s) => s !== identifier)
+        .map((s) => new RegExp(s))
+        .filter((re) => !re.test(''));
       const missing = SPEC_WORDS.filter((w) => !regexes.some((re) => re.test(w)));
       assert.deepStrictEqual(missing, [], `words without grammar coverage: ${missing.join(', ')}`);
     });
