@@ -32,6 +32,7 @@ import {
   KarkainSeverity,
   resolveDiagnosticFile,
   toDiagnosticRange,
+  toVscodeSeverityLevel,
   tryParseCheckJson,
 } from './diagnostics';
 import { KARKAIN_LANGUAGE_SERVER_ID, MIN_LANGUAGE_SERVER_VERSION } from './lsp';
@@ -207,11 +208,14 @@ async function restartLanguageClient(): Promise<void> {
   }
 }
 
+// The toolchain -> VS Code severity decision itself lives in diagnostics.ts as
+// `toVscodeSeverityLevel` so it can be unit-tested without an extension host;
+// this only translates the chosen level onto the vscode enum.
 function toVscodeSeverity(s: KarkainSeverity): vscode.DiagnosticSeverity {
-  switch (s) {
+  switch (toVscodeSeverityLevel(s)) {
     case 'warning':
       return vscode.DiagnosticSeverity.Warning;
-    case 'info':
+    case 'information':
       return vscode.DiagnosticSeverity.Information;
     case 'hint':
       return vscode.DiagnosticSeverity.Hint;

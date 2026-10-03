@@ -12,7 +12,42 @@ import * as path from 'path';
 // it stays unit-testable; the extension maps these items onto
 // vscode.Diagnostic objects.
 
-export type KarkainSeverity = 'error' | 'warning' | 'info' | 'hint';
+// The toolchain's severity vocabulary (pkg/diagnostics/reporter.go):
+//   SeverityError "error" | SeverityWarning "warning" | SeverityInfo "info"
+//   | SeverityNote "note" | SeverityHelp "help"
+// All five are real wire values; `info` is defined alongside the others and is
+// used by the reporter, so the extension models the complete set rather than a
+// subset. Every value maps explicitly in `toVscodeSeverityLevel`: no toolchain
+// severity may fall through to Error.
+export type KarkainSeverity = 'error' | 'warning' | 'info' | 'note' | 'help';
+
+/**
+ * The four severity levels VS Code can represent, named without importing
+ * vscode so the decision stays unit-testable.
+ */
+export type VscodeSeverityLevel = 'error' | 'warning' | 'information' | 'hint';
+
+const VSCODE_SEVERITY_BY_KARKAIN: Record<KarkainSeverity, VscodeSeverityLevel> = {
+  error: 'error',
+  warning: 'warning',
+  info: 'information',
+  // A note carries context about a primary finding ("= note: ..." fringe lines)
+  // rather than a problem of its own, so it is information, not an error.
+  note: 'information',
+  // Help is remediation text shown below the excerpt: the lowest-emphasis tier.
+  help: 'hint',
+};
+
+/**
+ * The production toolchain-severity -> VS Code severity decision, kept pure so
+ * it is unit-testable; extension.ts maps the returned level onto
+ * vscode.DiagnosticSeverity. Exhaustive by construction: TypeScript rejects a
+ * KarkainSeverity without an entry, so a new toolchain severity cannot silently
+ * be reported as an error.
+ */
+export function toVscodeSeverityLevel(s: KarkainSeverity): VscodeSeverityLevel {
+  return VSCODE_SEVERITY_BY_KARKAIN[s];
+}
 
 export interface KarkainDiagnostic {
   file: string;
@@ -30,6 +65,8 @@ export interface KarkainDiagnostic {
 }
 
 function normalizeSeverity(value: unknown): KarkainSeverity {
+  // Numeric severities follow the LSP convention (1 Error, 2 Warning,
+  // 3 Information, 4 Hint); they predate the string wire format.
   if (typeof value === 'number') {
     if (value === 2) {
       return 'warning';
@@ -38,7 +75,7 @@ function normalizeSeverity(value: unknown): KarkainSeverity {
       return 'info';
     }
     if (value === 4) {
-      return 'hint';
+      return 'help';
     }
     return 'error';
   }
@@ -47,18 +84,27 @@ function normalizeSeverity(value: unknown): KarkainSeverity {
     if (s === 'warning' || s === 'warn') {
       return 'warning';
     }
+    // `info` is a real toolchain severity (SeverityInfo), distinct from `note`.
     if (s === 'info' || s === 'information') {
       return 'info';
     }
-    if (s === 'hint') {
-      return 'hint';
+    // `note` is contextual fringe text attached to a primary finding, and
+    // `help` is remediation text. Both are explicit toolchain severities and
+    // must not be reported as errors.
+    if (s === 'note') {
+      return 'note';
+    }
+    if (s === 'help' || s === 'hint') {
+      return 'help';
     }
     if (s === 'error') {
       return 'error';
     }
   }
   // Unknown severity is surfaced as an error: never silently downgrade a
-  // diagnostic the toolchain considered worth reporting.
+  // diagnostic the toolchain considered worth reporting. Every severity the
+  // toolchain actually emits is handled above, so this only applies to values
+  // outside the documented contract.
   return 'error';
 }
 

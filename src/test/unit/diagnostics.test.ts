@@ -1,8 +1,10 @@
 import * as assert from 'assert';
 import {
   KarkainDiagnostic,
+  KarkainSeverity,
   resolveDiagnosticFile,
   toDiagnosticRange,
+  toVscodeSeverityLevel,
   tryParseCheckJson,
 } from '../../diagnostics';
 
@@ -53,7 +55,8 @@ describe('diagnostics', () => {
       ]);
       const got = tryParseCheckJson(out);
       assert.strictEqual(got?.[0].severity, 'error');
-      assert.strictEqual(got?.[1].severity, 'hint');
+      // LSP numeric 4 is Hint; the toolchain's equivalent wire value is `help`.
+      assert.strictEqual(got?.[1].severity, 'help');
       // Unknown severity is surfaced as error, never silently downgraded.
       assert.strictEqual(got?.[2].severity, 'error');
     });
@@ -94,6 +97,64 @@ describe('diagnostics', () => {
       ]);
       const got = tryParseCheckJson(out);
       assert.strictEqual(got?.[0].message, 'first\nsecond\nthird');
+    });
+
+    it('parses every toolchain severity without falling through to error', () => {
+      // The complete wire vocabulary from pkg/diagnostics/reporter.go. Parsing
+      // and mapping are checked together so a severity cannot be parsed
+      // correctly and then still surface as an error.
+      const WIRE: [KarkainSeverity, 'error' | 'warning' | 'information' | 'hint'][] = [
+        ['error', 'error'],
+        ['warning', 'warning'],
+        ['info', 'information'],
+        ['note', 'information'],
+        ['help', 'hint'],
+      ];
+      const out = JSON.stringify(
+        WIRE.map(([severity], i) => ({
+          file: 'a.kark',
+          line: i + 1,
+          column: 1,
+          severity,
+          code: '',
+          message: severity,
+        })),
+      );
+      const got = tryParseCheckJson(out);
+      assert.strictEqual(got?.length, WIRE.length);
+      WIRE.forEach(([wire, level], i) => {
+        const d = got?.[i];
+        assert.strictEqual(d?.severity, wire, `${wire} must parse unchanged`);
+        assert.strictEqual(toVscodeSeverityLevel(d?.severity as KarkainSeverity), level, `${wire} level`);
+      });
+      // The defect this guards: note and help must not reach VS Code Error.
+      const levels = (got ?? []).map((d) => toVscodeSeverityLevel(d.severity));
+      assert.strictEqual(levels.filter((l) => l === 'error').length, 1, 'only `error` maps to error');
+    });
+
+    it('maps note and help away from error while leaving error and warning alone', () => {
+      assert.strictEqual(toVscodeSeverityLevel('error'), 'error');
+      assert.strictEqual(toVscodeSeverityLevel('warning'), 'warning');
+      assert.strictEqual(toVscodeSeverityLevel('note'), 'information');
+      assert.strictEqual(toVscodeSeverityLevel('help'), 'hint');
+      assert.strictEqual(toVscodeSeverityLevel('info'), 'information');
+    });
+
+    it('accepts note and help in the wire output end to end', () => {
+      const out = JSON.stringify([
+        { file: 'a.kark', line: 1, column: 1, severity: 'note', code: '', message: 'context' },
+        { file: 'a.kark', line: 2, column: 1, severity: 'help', code: '', message: 'try this' },
+        { file: 'a.kark', line: 3, column: 1, severity: 'warning', code: 'W1', message: 'careful' },
+      ]);
+      const got = tryParseCheckJson(out);
+      assert.deepStrictEqual(
+        got?.map((d) => [d.severity, toVscodeSeverityLevel(d.severity)]),
+        [
+          ['note', 'information'],
+          ['help', 'hint'],
+          ['warning', 'warning'],
+        ],
+      );
     });
 
     it('parses endColumn when the toolchain reports a span', () => {
