@@ -140,4 +140,37 @@ suite('extension activation', () => {
     // An absent result is degraded, not a crash.
     assert.doesNotThrow(() => ext.exports.reportServerCapabilities(undefined));
   });
+
+  test('gates LSP compatibility on the server-reported version', async () => {
+    // The server is the authority for its own version, independent of whatever
+    // the CLI toolchain reports.
+    const ext = await activate();
+    const base = {
+      capabilities: {
+        textDocumentSync: { openClose: true, change: 1 },
+        completionProvider: { triggerCharacters: ['.', ':'] },
+        semanticTokensProvider: { legend: { tokenTypes: [], tokenModifiers: [] }, full: true },
+        hoverProvider: true,
+        definitionProvider: true,
+        documentSymbolProvider: true,
+        formattingProvider: true,
+      },
+    };
+    // Supported, stale, and unreadable server versions all handled gracefully.
+    assert.doesNotThrow(() =>
+      ext.exports.reportServerCapabilities({
+        ...base,
+        serverInfo: { name: 'karkain-lsp', version: '1.1.0' },
+      }),
+    );
+    assert.doesNotThrow(() =>
+      ext.exports.reportServerCapabilities({
+        ...base,
+        serverInfo: { name: 'karkain-lsp', version: '1.0.0' },
+      }),
+    );
+    assert.doesNotThrow(() =>
+      ext.exports.reportServerCapabilities({ ...base, serverInfo: { name: 'karkain-lsp' } }),
+    );
+  });
 });

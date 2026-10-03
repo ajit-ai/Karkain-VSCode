@@ -71,7 +71,19 @@ export interface CapabilityNegotiation {
   /** True when nothing required is missing. */
   compatible: boolean;
   serverName?: string;
+  /** Raw `serverInfo.version` string exactly as the server reported it. */
   serverVersion?: string;
+  /**
+   * False when `serverInfo.version` is absent or unparseable. An unknown
+   * version is never treated as supported.
+   */
+  serverVersionKnown: boolean;
+  /**
+   * True only when the language server itself reports a version at or above
+   * MIN_LANGUAGE_SERVER_VERSION. This is the sole basis for LSP compatibility;
+   * the CLI `--version` probe is a different domain and must not be used here.
+   */
+  serverVersionSupported: boolean;
 }
 
 /**
@@ -86,12 +98,17 @@ export interface CapabilityNegotiation {
 export function negotiateServerCapabilities(
   result: LspInitializeResult | undefined | null,
 ): CapabilityNegotiation {
+  const info = result?.serverInfo;
   const missing = findMissingCapabilities(result?.capabilities);
   return {
     missing,
     compatible: missing.length === 0,
-    serverName: result?.serverInfo?.name,
-    serverVersion: result?.serverInfo?.version,
+    serverName: info?.name,
+    serverVersion: info?.version,
+    // Both helpers are the existing, already-tested contracts: no version
+    // parsing or comparison is re-implemented here.
+    serverVersionKnown: parseServerVersion(info) !== null,
+    serverVersionSupported: isSupportedServer(info),
   };
 }
 

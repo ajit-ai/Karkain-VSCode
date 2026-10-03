@@ -15,7 +15,6 @@ import {
   checkArgs,
   classifyProbe,
   cleanArgs,
-  compareVersions,
   configArgs,
   isKarkFile,
   listOnPath,
@@ -64,7 +63,10 @@ import {
 type LanguageClientType = any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let client: LanguageClientType | null = null;
-let detectedVersion: string | undefined;
+// CLI toolchain version, from `karkain --version`. This is the toolchain domain
+// (gates CLI-only features such as `check --format=json`). It is deliberately
+// NOT the language server version; LSP compatibility uses serverInfo instead.
+let toolchainVersion: string | undefined;
 let channel: vscode.OutputChannel | undefined;
 let lspChannel: vscode.OutputChannel | undefined;
 let testChannel: vscode.OutputChannel | undefined;
@@ -125,21 +127,18 @@ function notifyProbeIssue(key: string, message: string): void {
 }
 
 async function probeToolchain(): Promise<void> {
-  detectedVersion = undefined;
+  toolchainVersion = undefined;
   const result = await execTool(versionArgs());
   const outcome = classifyProbe(result, result.notFound);
   if (outcome.kind === 'ok') {
     notifiedProbeIssues.clear();
-    detectedVersion = outcome.version;
-    const lspOk = compareVersions(outcome.version, MIN_LANGUAGE_SERVER_VERSION) >= 0;
+    toolchainVersion = outcome.version;
+    // Toolchain facts only. LSP compatibility is NOT decided here: it comes from
+    // the language server's own serverInfo once it has initialized, because the
+    // CLI version and the LSP protocol version are separate domains.
     log(
-      `Karkain toolchain: ${outcome.raw} (structured diagnostics: ${supportsStructuredDiagnostics(outcome.version) ? 'yes' : 'requires >= 1.1.0'}; language server: ${lspOk ? 'supported' : `expects >= ${MIN_LANGUAGE_SERVER_VERSION}`})`,
+      `Karkain toolchain: ${outcome.raw} (structured diagnostics: ${supportsStructuredDiagnostics(outcome.version) ? 'yes' : 'requires >= 1.1.0'})`,
     );
-    if (!lspOk) {
-      void vscode.window.showWarningMessage(
-        `Karkain: language intelligence is verified against ${MIN_LANGUAGE_SERVER_VERSION}+ (detected ${outcome.version}).`,
-      );
-    }
     return;
   }
   switch (outcome.kind) {
@@ -174,6 +173,26 @@ async function probeToolchain(): Promise<void> {
 export function reportServerCapabilities(result: unknown): void {
   const negotiation = negotiateServerCapabilities(result as LspInitializeResult | undefined);
   const who = negotiation.serverName ?? 'karkain-lsp';
+
+  // LSP compatibility is decided ONLY from the server's own reported version.
+  // Never from the CLI `--version` probe: the two can diverge, and conflating
+  // them previously let a stale toolchain version stand in for the server's.
+  if (!negotiation.serverVersionKnown) {
+    log(
+      `Karkain language server ${who} did not report a usable version; LSP compatibility could not be established.`,
+    );
+    void vscode.window.showWarningMessage(
+      'Karkain: the language server did not report a version, so its compatibility could not be verified. See the Karkain Language Server output channel.',
+    );
+  } else if (!negotiation.serverVersionSupported) {
+    log(
+      `Karkain language server ${who} reports ${negotiation.serverVersion}, below the verified ${MIN_LANGUAGE_SERVER_VERSION}+ baseline. The server is still used.`,
+    );
+    void vscode.window.showWarningMessage(
+      `Karkain: the language server reports ${negotiation.serverVersion}; language intelligence is verified against ${MIN_LANGUAGE_SERVER_VERSION}+. It is still used.`,
+    );
+  }
+
   if (negotiation.compatible) {
     log(`Karkain language server ready (${who} ${negotiation.serverVersion ?? ''}).`.trim());
     return;
@@ -399,7 +418,9 @@ async function runCheck(doc: vscode.TextDocument): Promise<void> {
   // else undefined. This also anchors relative diagnostic `file` paths.
   const folder = effectiveCwd(file);
   const useJson =
-    detectedVersion === undefined || detectedVersion === '' || supportsStructuredDiagnostics(detectedVersion);
+    toolchainVersion === undefined ||
+    toolchainVersion === '' ||
+    supportsStructuredDiagnostics(toolchainVersion);
   if (!useJson) {
     void vscode.window.showWarningMessage(
       'Karkain: structured diagnostics require Karkain 1.1.0+. Raw compiler output was written to the Karkain channel.',
