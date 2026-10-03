@@ -208,6 +208,7 @@
     "lint": "eslint src --ext .ts",
     "format:check": "prettier --check .",
     "test:unit": "npm run compile && mocha",
+    "test:integration": "npm run compile && node scripts/run-integration.mjs",
     "test:lsp-smoke": "node scripts/lsp-smoke.mjs",
     "test:toolchain-smoke": "node scripts/toolchain-smoke.mjs",
     "package": "vsce package"
@@ -221,6 +222,7 @@
     "@types/vscode": "^1.75.0",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
+    "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^2.24.0",
     "eslint": "^8.57.0",
     "mocha": "^10.4.0",

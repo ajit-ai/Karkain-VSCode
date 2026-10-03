@@ -4,6 +4,41 @@ All notable changes follow Semantic Versioning. The extension stays pre-1.0
 until core language support, diagnostics, build, run, IntelliSense, tests, green
 CI, VSIX packaging, complete docs and understood cross-platform behavior.
 
+## [Unreleased] — Phase 1 foundation (testability)
+
+No user-visible behaviour change. This increment closes the testability gap
+that the audit identified as the root blocker for the rest of Phase 1.
+
+- **Toolchain seam** (`src/toolchainService.ts`): every Karkain process now
+  starts through one `ToolchainService.run(args, {cwd, env, timeoutMs, token})`
+  call. `child_process` is imported in exactly one file. The service captures
+  stdout, stderr and an ordered `combined` transcript, and reports a missing
+  executable (`notFound`) separately from a non-zero exit, so callers no longer
+  re-derive that distinction.
+- `extension.ts` refactored onto the seam. Behaviour preserved, including the
+  two-engine `check --format=json` probe (both probes are required by the CLI
+  contract and are documented in place). The previous 120 s probe timeout is now
+  applied to `check`, `test` and the debug build as well as the version probe,
+  so a hung compiler can no longer hang a command indefinitely.
+- `activate()` now returns a small API (`{ setToolchainService }`) so the
+  extension-host suite can substitute the seam.
+- **In-memory fake** (`src/test/fakes/toolchainFake.ts`): programmable per
+  invocation, records argv/cwd/env for assertions. Ships in neither the VSIX
+  nor production paths (`out/test/**` is already excluded).
+- **Extension-host suite** (`src/test/suite/`, `npm run test:integration`):
+  asserts activation, registration of all 11 contributed commands, the `karkain`
+  language id, survival of a completely missing toolchain, and that `--version`
+  and `karkain target` are reached through the injected service. This is the
+  first coverage of the activation path, which previously had none.
+  The runner prefers a locally installed VS Code (`KARKAIN_VSCODE_PATH`,
+  else the standard install locations) and only downloads a pinned build as a
+  fallback, which avoids a ~340 MB download on developer machines.
+- Unit suite: 89 → 104 cases. The new cases cover the real Node implementation
+  (stdout/stderr separation, exit codes, ENOENT, env overlay, timeout kill,
+  cancellation) and the fake (recording, per-call behaviour, combined output).
+  Writing the fake surfaced a real defect in it — a response with an explicit
+  `code: null` was coerced to `0` by `??` — which is now covered.
+
 ## [0.9.1] — 2026-10-02 (Phase 1 integration hardening)
 
 Defect-fix release. No new features; nothing that previously worked was

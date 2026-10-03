@@ -8,7 +8,6 @@
 // never re-implements compiler work: every semantic result comes from the
 // toolchain.
 import * as vscode from 'vscode';
-import { execFile, spawn } from 'child_process';
 import * as fs from 'fs';
 import {
   buildArgs,
@@ -48,6 +47,12 @@ import {
 import { getCompilerPath, getDebuggerPath, getFormatOnSave, getTarget } from './config';
 import { cppdbgLaunchConfig, debugBinaryPath, debugBuildArgs } from './debug';
 import { applyTarget, parseTargetOutput } from './targets';
+import {
+  DEFAULT_TOOLCHAIN_TIMEOUT_MS,
+  NodeToolchainService,
+  ToolchainRunResult,
+  ToolchainService,
+} from './toolchainService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type LanguageClientType = any;
@@ -77,20 +82,28 @@ interface ExecResult {
   notFound: boolean;
 }
 
-function execTool(args: string[], cwd?: string): Promise<ExecResult> {
-  return new Promise((resolve) => {
-    execFile(getCompilerPath(), args, { encoding: 'utf8', cwd, timeout: 120000 }, (err, stdout, stderr) => {
-      const execErr = err as { code?: unknown } | null;
-      const notFound = !!execErr && typeof execErr.code === 'string' && execErr.code === 'ENOENT';
-      const code = execErr && typeof execErr.code === 'number' ? (execErr.code as number) : execErr ? -1 : 0;
-      resolve({
-        code,
-        stdout: String(stdout ?? ''),
-        stderr: String(stderr ?? ''),
-        notFound,
-      });
-    });
-  });
+// The one place the extension is allowed to start a Karkain process.
+// `toolchain` is reassigned by the integration suite so activation can be
+// exercised without a real toolchain on PATH.
+let toolchain: ToolchainService = new NodeToolchainService(getCompilerPath);
+
+/** Replaces the process seam. Intended for tests; production never calls this. */
+export function setToolchainService(service: ToolchainService): void {
+  toolchain = service;
+}
+
+function currentToolchain(): ToolchainService {
+  return toolchain;
+}
+
+async function execTool(args: string[], cwd?: string): Promise<ExecResult> {
+  const r = await currentToolchain().run(args, { cwd, timeoutMs: DEFAULT_TOOLCHAIN_TIMEOUT_MS });
+  return {
+    code: r.code === null ? -1 : r.code,
+    stdout: r.stdout,
+    stderr: r.stderr,
+    notFound: r.notFound,
+  };
 }
 
 // One notification per distinct problem kind per session, so re-probing on
@@ -311,27 +324,22 @@ interface CheckSpawn {
   spawnError?: string;
 }
 
-function spawnCheck(
+async function spawnCheck(
   file: string,
   folder: string | undefined,
   extraEnv: NodeJS.ProcessEnv,
 ): Promise<CheckSpawn> {
-  return new Promise<CheckSpawn>((resolve) => {
-    const proc = spawn(getCompilerPath(), checkArgs(file, true), {
-      cwd: folder,
-      env: { ...process.env, ...extraEnv },
-    });
-    let stdout = '';
-    let stderr = '';
-    proc.stdout.on('data', (d) => {
-      stdout += String(d);
-    });
-    proc.stderr.on('data', (d) => {
-      stderr += String(d);
-    });
-    proc.on('error', (err) => resolve({ code: null, stdout, stderr, spawnError: err.message }));
-    proc.on('close', (code) => resolve({ code, stdout, stderr }));
+  const r: ToolchainRunResult = await currentToolchain().run(checkArgs(file, true), {
+    cwd: folder,
+    env: extraEnv,
+    timeoutMs: DEFAULT_TOOLCHAIN_TIMEOUT_MS,
   });
+  return {
+    code: r.code,
+    stdout: r.stdout,
+    stderr: r.stderr,
+    spawnError: r.spawnError,
+  };
 }
 
 async function runCheck(doc: vscode.TextDocument): Promise<void> {
@@ -653,27 +661,13 @@ async function executeTestRun(
     testChannel?.appendLine(`$ karkain test ${target.uri.fsPath}`);
     const folder = vscode.workspace.getWorkspaceFolder(target.uri)?.uri.fsPath;
     const cwd = findProjectRoot(target.uri.fsPath) ?? folder;
-    const outcome = await new Promise<{ code: number | null; out: string; spawnError?: string }>(
-      (resolve) => {
-        const proc = spawn(getCompilerPath(), testFileArgs(target.uri.fsPath), { cwd });
-        let out = '';
-        proc.stdout.on('data', (d) => {
-          out += String(d);
-        });
-        proc.stderr.on('data', (d) => {
-          out += String(d);
-        });
-        const subscription = token.onCancellationRequested(() => proc.kill());
-        proc.on('error', (err) => {
-          subscription.dispose();
-          resolve({ code: null, out, spawnError: err.message });
-        });
-        proc.on('close', (code) => {
-          subscription.dispose();
-          resolve({ code, out });
-        });
-      },
-    );
+    const outcome = await currentToolchain()
+      .run(testFileArgs(target.uri.fsPath), {
+        cwd,
+        token,
+        timeoutMs: DEFAULT_TOOLCHAIN_TIMEOUT_MS,
+      })
+      .then((r) => ({ code: r.code, out: r.combined, spawnError: r.spawnError }));
     if (outcome.spawnError !== undefined) {
       testChannel?.appendLine(`failed to start: ${outcome.spawnError}`);
       children.forEach((c) =>
@@ -735,18 +729,9 @@ async function runDebug(): Promise<void> {
     debugChannel?.appendLine(`note: karkain.target is '${getTarget()}'; debugging always uses a host build`);
   }
   debugChannel?.appendLine(`$ karkain build -g ${file} -o ${program}`);
-  const build = await new Promise<{ code: number | null; out: string }>((resolve) => {
-    const proc = spawn(getCompilerPath(), debugBuildArgs(file, program), { cwd });
-    let out = '';
-    proc.stdout.on('data', (d) => {
-      out += String(d);
-    });
-    proc.stderr.on('data', (d) => {
-      out += String(d);
-    });
-    proc.on('error', (err) => resolve({ code: null, out: out + err.message }));
-    proc.on('close', (code) => resolve({ code, out }));
-  });
+  const build = await currentToolchain()
+    .run(debugBuildArgs(file, program), { cwd, timeoutMs: DEFAULT_TOOLCHAIN_TIMEOUT_MS })
+    .then((r) => ({ code: r.code, out: r.spawnError ? r.combined + r.spawnError : r.combined }));
   debugChannel?.append(build.out);
   if (build.code !== 0) {
     debugChannel?.appendLine(`(debug build failed, exit ${build.code})`);
@@ -770,7 +755,23 @@ async function runDebug(): Promise<void> {
   }
 }
 
-export function activate(context: vscode.ExtensionContext): void {
+/**
+ * The extension's public API. Currently a single test-only seam.
+ *
+ * This is deliberately the *entire* exported surface rather than a DI
+ * container: removing it would leave the extension-host suite with no way to
+ * substitute the toolchain, and the only alternatives are a bespoke injection
+ * framework (more production surface than the seam it replaces) or requiring a
+ * real `karkain` on PATH (which would make the activation tests
+ * environment-dependent). It costs one exported symbol and keeps every
+ * production code path free of test knowledge.
+ */
+export interface KarkainExtensionApi {
+  /** Replaces the process seam. Intended for tests; production never calls this. */
+  setToolchainService(service: ToolchainService): void;
+}
+
+export function activate(context: vscode.ExtensionContext): KarkainExtensionApi {
   channel = vscode.window.createOutputChannel('Karkain');
   context.subscriptions.push(channel);
   lspChannel = vscode.window.createOutputChannel('Karkain Language Server');
@@ -1059,6 +1060,7 @@ export function activate(context: vscode.ExtensionContext): void {
       testController?.items.delete(uri.toString());
     }),
   );
+  return { setToolchainService };
 }
 
 export function deactivate(): Thenable<void> | undefined {

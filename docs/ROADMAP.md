@@ -1,7 +1,32 @@
 # Roadmap (internal, numbered)
 
-Status: Phases 1–9 complete. No phase is skipped; each lands with tests,
-validation runs, docs updates and an honest limitation report.
+Status: Phases 1–9 complete, plus a Phase 1 integration-hardening pass and the
+start of a second Phase 1 track on testability. No phase is skipped; each lands
+with tests, validation runs, docs updates and an honest limitation report.
+
+- [x] **Phase 10 — Toolchain service seam** (`src/toolchainService.ts`): one
+      `ToolchainService` interface owns every Karkain process; `child_process`
+      is imported in exactly one file; stdout/stderr/ordered-combined capture
+      with explicit `notFound` vs non-zero-exit reporting. `activate()` returns
+      `{ setToolchainService }`. In-memory fake under `src/test/fakes/`.
+- [x] **Phase 11 — Extension-host suite** (`npm run test:integration`): first
+      coverage of activation, all 11 contributed commands, the `karkain`
+      language id, missing-toolchain survival, and CLI reachability through the
+      injected seam. Unit suite 89 → 104 cases. Prefers a local VS Code install
+      over a ~340 MB download.
+      Still open in this track: CI does not run the integration suite, the two
+      manual smoke gates still need a real toolchain, and the check/test/debug
+      orchestration paths are covered only where the fake can observe them.
+- [ ] **Phase 12 — Capability negotiation and project model**: activate the
+      already-written-but-dead negotiation in `src/lsp.ts` (capability gate,
+      `serverInfo` version), auto-restart the language client when
+      `karkain.compilerPath` changes, and parse `karkain.toml` into a real
+      project model (`manifestPath` in `src/project.ts` is still unused).
+- [ ] **Phase 13 — `karkain ide info` consumption**: replace hardcoded argv
+      with the toolchain's own machine-readable contract
+      (`schemaVersion: 1`: argv shapes, diagnostics schema, exit codes), keeping
+      the hardcoded vectors as a fallback because no stability guarantee is
+      stated.
 
 - [x] **Phase 1 — Repository Foundation & Architecture**: Karkain inspection
       (docs/KARKAIN-INSPECTION.md), boundary (docs/INTEGRATION-BOUNDARY.md),

@@ -8,6 +8,8 @@ language-configuration.json / syntaxes/karkain.tmLanguage.json
 src/
   extension.ts    activation, commands, terminals, Problems wiring,
                   formatting provider, LSP client lifecycle, output channels
+  toolchainService.ts  the only importer of child_process: ToolchainService
+                  interface + Node implementation (run/exec seam)
   toolchain.ts    pure: version parse/compare, .kark match, argv builders
   diagnostics.ts  pure: check --format=json schema-v1 parsing/validation
   lsp.ts          pure: server capability negotiation, version gate, symbol kinds
@@ -17,13 +19,35 @@ src/
   debug.ts        pure: -g build argv, program path, cppdbg launch/attach configs
   targets.ts      pure: target-matrix/detail parsing, --target argv insertion
   config.ts       settings access (compilerPath/debuggerPath/formatOnSave/target)
-  test/unit/      mocha unit tests for the pure modules
+  test/unit/      mocha unit tests for the pure modules + the toolchain service
+  test/fakes/     in-memory ToolchainService (never spawns; out/test is
+                  excluded from the VSIX)
+  test/suite/     extension-host suite (mocha `tdd`) run by
+                  `npm run test:integration` via scripts/run-integration.mjs
 fixtures/         real .kark programs (hello-world, diagnostics negatives,
                   syntax showcase, lsp smoke)
 scripts/          manual gates requiring a real toolchain (lsp-smoke,
-                  toolchain-smoke; not in CI)
+                  toolchain-smoke) plus the extension-host runner
 docs/             inspection, boundary, roadmap, architecture
 ```
+
+## Testability boundary
+
+`src/toolchainService.ts` is the single seam between the extension and the
+`karkain` executable; nothing else imports `child_process`. `activate()`
+returns `{ setToolchainService }`, so the extension-host suite can substitute a
+fake and exercise activation, command registration and the CLI-backed commands
+with no Karkain toolchain installed.
+
+Two suites, deliberately separate:
+
+- `npm run test:unit` — mocha over `out/test/unit`, no editor process, no
+  download. Covers pure logic plus the real `NodeToolchainService` (which
+  spawns `node -e` and the local editor-independent paths).
+- `npm run test:integration` — real VS Code extension host. Covers activation
+  and provider/command registration. Prefers a locally installed VS Code and
+  falls back to downloading a pinned build; set `KARKAIN_VSCODE_PATH` to point
+  at a specific editor, or `KARKAIN_VSCODE_DOWNLOAD=1` to force the download.
 
 ## Lifecycle
 
