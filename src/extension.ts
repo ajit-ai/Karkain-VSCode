@@ -10,6 +10,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import {
   buildArgs,
   candidateExecutableNames,
@@ -59,6 +60,24 @@ import {
   ToolchainRunResult,
   ToolchainService,
 } from './toolchainService';
+import { parseIdeInfo } from './capability';
+import { ActionKind } from './recentActions';
+import { buildHealthReport } from './health';
+import { ControlCenter, registerControlCenter } from './controlCenter';
+import { SharedViewState } from './views/common';
+import { DOC_TOPICS } from './views/docs';
+import {
+  getBuildArgs,
+  getEngine,
+  getEnv,
+  getExamplesPath,
+  getRunArgs,
+  getStdlibPath,
+  getTraceServer,
+  getWorkingDirectory,
+} from './config';
+import { splitFlags } from './flags';
+import type { EngineKind } from './config';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type LanguageClientType = any;
@@ -78,6 +97,25 @@ let debugChannel: vscode.OutputChannel | undefined;
 let targetStatus: vscode.StatusBarItem | undefined;
 // `${uri}#${testName}` -> declaration range for failure navigation.
 const testRanges = new Map<string, vscode.Range>();
+
+// ---- Control Center shared state ----
+// View providers read this synchronously; the extension updates it on probes,
+// activation and config changes. Nothing in this object fabricates data —
+// values are what the last observation actually produced.
+const sharedViewState: SharedViewState = {
+  compilerLabel: 'not probed yet',
+  compilerStatus: 'unknown',
+  lspRunning: false,
+  lspRestarts: 0,
+  lastLspError: undefined,
+  healthOverall: undefined,
+};
+let controlCenter: ControlCenter | null = null;
+// The last successful run/launch target, for "Re-run Last Run".
+let lastRunLaunch: { file: string; flags: string[] } | undefined;
+let lastRunTerminal: vscode.Terminal | undefined;
+let lspRestarts = 0;
+const extensionInfo = { version: '1.0.0' };
 
 function log(msg: string): void {
   channel?.appendLine(msg);
@@ -105,8 +143,26 @@ function currentToolchain(): ToolchainService {
   return toolchain;
 }
 
-async function execTool(args: string[], cwd?: string): Promise<ExecResult> {
-  const r = await currentToolchain().run(args, { cwd, timeoutMs: DEFAULT_TOOLCHAIN_TIMEOUT_MS });
+function engineEnv(scope?: vscode.WorkspaceFolder): NodeJS.ProcessEnv {
+  const engine: EngineKind = getEngine(scope);
+  return engine ? { KARKAIN_ENGINE: engine } : {};
+}
+
+async function execTool(
+  args: string[],
+  cwd?: string,
+  scope?: vscode.WorkspaceFolder,
+  extraEnv?: NodeJS.ProcessEnv,
+): Promise<ExecResult> {
+  // Merge order (later wins): process env (inside the service) < karkain.env <
+  // engine override < caller's extra env. Never mutates the caller's object.
+  const overlay: NodeJS.ProcessEnv = { ...getEnv(scope), ...engineEnv(scope), ...(extraEnv ?? {}) };
+  const hasOverlay = Object.keys(overlay).length > 0;
+  const r = await currentToolchain().run(args, {
+    cwd,
+    env: hasOverlay ? overlay : undefined,
+    timeoutMs: DEFAULT_TOOLCHAIN_TIMEOUT_MS,
+  });
   return {
     code: r.code === null ? -1 : r.code,
     stdout: r.stdout,
@@ -134,16 +190,22 @@ async function probeToolchain(): Promise<void> {
   if (outcome.kind === 'ok') {
     notifiedProbeIssues.clear();
     toolchainVersion = outcome.version;
+    sharedViewState.compilerLabel = outcome.raw.split('\n')[0];
+    sharedViewState.compilerStatus = 'ok';
+    controlCenter?.refreshAll();
     // Toolchain facts only. LSP compatibility is NOT decided here: it comes from
     // the language server's own serverInfo once it has initialized, because the
     // CLI version and the LSP protocol version are separate domains.
     log(
       `Karkain toolchain: ${outcome.raw} (structured diagnostics: ${supportsStructuredDiagnostics(outcome.version) ? 'yes' : 'requires >= 1.1.0'})`,
     );
+    controlCenter?.refreshAll();
     return;
   }
   switch (outcome.kind) {
     case 'notFound':
+      sharedViewState.compilerLabel = 'not found';
+      sharedViewState.compilerStatus = 'fail';
       log(`Karkain executable not found: ${result.stderr}. Set karkain.compilerPath or add karkain to PATH.`);
       notifyProbeIssue(
         'not-found',
@@ -151,6 +213,8 @@ async function probeToolchain(): Promise<void> {
       );
       break;
     case 'unrecognized':
+      sharedViewState.compilerLabel = 'unrecognized output';
+      sharedViewState.compilerStatus = 'warn';
       log(`Karkain toolchain responded with unrecognized version output: ${outcome.raw}`);
       notifyProbeIssue(
         'unrecognized',
@@ -158,6 +222,8 @@ async function probeToolchain(): Promise<void> {
       );
       break;
     case 'failed':
+      sharedViewState.compilerLabel = `probe failed (exit ${outcome.code})`;
+      sharedViewState.compilerStatus = 'warn';
       log(`Karkain toolchain probe failed (exit ${outcome.code}): ${outcome.detail}`);
       notifyProbeIssue(
         `failed:${outcome.code}`,
@@ -165,6 +231,7 @@ async function probeToolchain(): Promise<void> {
       );
       break;
   }
+  controlCenter?.refreshAll();
 }
 
 // Validates the capabilities of the server that actually came up, using the
@@ -339,6 +406,9 @@ async function startLanguageClient(context: vscode.ExtensionContext): Promise<vo
     if (client === next) {
       client = null;
     }
+    sharedViewState.lspRunning = false;
+    sharedViewState.lastLspError = (e as Error).message;
+    controlCenter?.refreshAll();
     log(`Karkain language client failed to start: ${(e as Error).message}`);
     void vscode.window.showWarningMessage(
       'Karkain: the language server did not start. check/build/run still work; see the Karkain Language Server output channel.',
@@ -353,7 +423,27 @@ async function startLanguageClient(context: vscode.ExtensionContext): Promise<vo
     },
   });
   log('Karkain language client started (`karkain lsp` over stdio).');
+  sharedViewState.lspRunning = true;
+  sharedViewState.lastLspError = undefined;
+  controlCenter?.refreshAll();
   reportServerCapabilities(next.initializeResult);
+  applyTraceLevel();
+}
+
+// LSP trace level comes from karkain.trace.server; applying it needs the raw
+// client handle, so it is a no-op until the client exists.
+function applyTraceLevel(): void {
+  if (!client) {
+    return;
+  }
+  const level = getTraceServer();
+  const map: Record<string, number> = { off: 0, messages: 1, verbose: 3 };
+  const setTrace = (client as { setTrace?: (v: number) => Promise<void> }).setTrace;
+  if (typeof setTrace === 'function') {
+    void setTrace.call(client, map[level] ?? 0).catch((e: unknown) => {
+      log(`setTrace(${level}) failed: ${e instanceof Error ? e.message : String(e)}`);
+    });
+  }
 }
 
 async function restartLanguageClient(): Promise<void> {
@@ -364,6 +454,8 @@ async function restartLanguageClient(): Promise<void> {
       log(`Language client stop reported: ${(e as Error).message}`);
     }
     client = null;
+    sharedViewState.lspRunning = false;
+    controlCenter?.refreshAll();
   }
 }
 
@@ -383,6 +475,8 @@ function restartLanguageClientAndStart(context: vscode.ExtensionContext): Promis
   const run = (async () => {
     // Awaited so a stop can never race the next start.
     await restartLanguageClient();
+    lspRestarts += 1;
+    sharedViewState.lspRestarts = lspRestarts;
     await startLanguageClient(context);
   })().finally(() => {
     restartInFlight = null;
@@ -420,12 +514,29 @@ function activeKarkainDocument(): vscode.TextDocument | null {
   return doc;
 }
 
+// The integrated terminals launched for build/run/clean honour the same
+// karkain.env overlay and engine override as spawned processes.
+function terminalEnv(scope?: vscode.WorkspaceFolder): NodeJS.ProcessEnv {
+  return { ...getEnv(scope), ...engineEnv(scope) };
+}
+
 // `scope` is the workspace folder that owns the file the command acts on, so a
 // multi-root window runs each root's own configured toolchain.
-function runInTerminal(label: string, args: string[], cwd?: string, scope?: vscode.WorkspaceFolder): void {
-  const term = vscode.window.createTerminal({ name: label, cwd });
+function runInTerminal(
+  label: string,
+  args: string[],
+  cwd?: string,
+  scope?: vscode.WorkspaceFolder,
+): vscode.Terminal {
+  const term = vscode.window.createTerminal({ name: label, cwd, env: terminalEnv(scope) });
   term.show(true);
-  term.sendText(`${getCompilerPath(scope)} ${args.map(quoteTerminalArg).join(' ')}`);
+  term.sendText(`${quoteTerminalArg(getCompilerPath(scope))} ${args.map(quoteTerminalArg).join(' ')}`);
+  return term;
+}
+
+function recordAction(kind: ActionKind, summary: string, ok: boolean | null): void {
+  controlCenter?.recentActions.record({ kind, summary, ok });
+  controlCenter?.refreshAll();
 }
 
 // Working directory for file commands: the karkain.toml project root when the
@@ -462,6 +573,21 @@ function configScopeFor(file: string): vscode.WorkspaceFolder | undefined {
 /** Same, from an open document (its URI is the resource VS Code scopes on). */
 function configScopeForDoc(doc: vscode.TextDocument | undefined): vscode.WorkspaceFolder | undefined {
   return doc ? configScopeFor(doc.uri.fsPath) : undefined;
+}
+
+// Resolves the configured debugger (karkain.debuggerPath). Absolute paths are
+// used as-is when they exist; bare names are looked up on PATH. Returns null
+// when nothing resolvable exists.
+function resolvedDebuggerPath(scope?: vscode.WorkspaceFolder): string | null {
+  const configured = getDebuggerPath(scope);
+  const configuredIsPath = configured.includes('/') || configured.includes('\\');
+  if (configuredIsPath) {
+    return fs.existsSync(configured) ? configured : null;
+  }
+  return (
+    resolveOnPath(pathDirectories(), [configured], (p) => fs.existsSync(p)) ??
+    (fs.existsSync(configured) ? configured : null)
+  );
 }
 
 function pathDirectories(): string[] {
@@ -607,6 +733,7 @@ async function runCheck(doc: vscode.TextDocument): Promise<void> {
     const r = await spawnCheck(file, folder, attempt.env);
     if (r.spawnError !== undefined) {
       log(`Karkain check failed to start: ${r.spawnError}`);
+      recordAction('check', `check ${path.basename(file)} (spawn failed)`, false);
       void vscode.window.showErrorMessage(
         'Karkain: could not start the karkain executable. Configure `karkain.compilerPath` or add karkain to PATH.',
       );
@@ -616,6 +743,11 @@ async function runCheck(doc: vscode.TextDocument): Promise<void> {
     if (parsed !== null) {
       result = r;
       usedEngine = attempt.label;
+      recordAction(
+        'check',
+        `check ${path.basename(file)} (${attempt.label}, exit ${r.code}, ${parsed.length} problem(s))`,
+        parsed.length === 0,
+      );
       reportCheck(doc, file, folder, r, parsed);
       return;
     }
@@ -631,10 +763,12 @@ async function runCheck(doc: vscode.TextDocument): Promise<void> {
       'Karkain: structured diagnostics require Karkain 1.1.0+. Raw compiler output was written to the Karkain channel.',
     );
   } else if (last.code !== 0) {
+    recordAction('check', `check ${path.basename(file)} (engine ${usedEngine}, exit ${last.code})`, false);
     void vscode.window.showErrorMessage(
       `Karkain: check failed (exit ${last.code}). See the Karkain output channel.`,
     );
   } else {
+    recordAction('check', `check ${path.basename(file)} (engine ${usedEngine}, ok)`, true);
     vscode.window.setStatusBarMessage('Karkain: check passed', 3000);
   }
 }
@@ -875,6 +1009,7 @@ async function executeTestRun(
   }
   const run = testController.createTestRun(request);
   const targets = collectTestRuns(request);
+  recordAction('test', `test ${targets.map((t) => path.basename(t.uri.fsPath)).join(', ') || '(all)'}`, null);
   for (const target of targets) {
     if (token.isCancellationRequested) {
       break;
@@ -965,6 +1100,7 @@ async function runDebug(): Promise<void> {
   debugChannel?.append(build.out);
   if (build.code !== 0) {
     debugChannel?.appendLine(`(debug build failed, exit ${build.code})`);
+    recordAction('debug', `debug ${path.basename(file)} (build failed)`, false);
     void vscode.window.showErrorMessage('Karkain: debug build failed. See the Karkain Debug channel.');
     return;
   }
@@ -978,6 +1114,7 @@ async function runDebug(): Promise<void> {
   const config = cppdbgLaunchConfig(program, getDebuggerPath(folder));
   debugChannel?.appendLine(`launching ${program} under GDB`);
   const started = await vscode.debug.startDebugging(folder, config);
+  recordAction('debug', `debug ${path.basename(file)}`, started);
   if (!started) {
     void vscode.window.showErrorMessage(
       'Karkain: debugger did not start. Is the C/C++ extension (cppdbg) installed and GDB on PATH?',
@@ -1049,24 +1186,33 @@ export function activate(context: vscode.ExtensionContext): KarkainExtensionApi 
         // Every argument below is resolved against the folder owning this file,
         // so a multi-root window builds with the right root's settings.
         const scope = configScopeFor(doc.uri.fsPath);
+        const args = [...buildArgs(doc.uri.fsPath), ...splitFlags(getBuildArgs(scope))];
         runInTerminal(
           'karkain build',
-          applyTarget(buildArgs(doc.uri.fsPath), getTarget(scope)),
-          effectiveCwd(doc.uri.fsPath),
+          applyTarget(args, getTarget(scope)),
+          getWorkingDirectory(scope) || effectiveCwd(doc.uri.fsPath),
           scope,
         );
+        controlCenter?.refreshAll();
+        recordAction('build', `build ${path.basename(doc.uri.fsPath)}`, null);
       }
     }),
     vscode.commands.registerCommand('karkain.run', () => {
       const doc = activeKarkainDocument();
       if (doc) {
         const scope = configScopeFor(doc.uri.fsPath);
-        runInTerminal(
+        const runArgsForDoc = [...runArgs(doc.uri.fsPath), ...splitFlags(getRunArgs(scope))];
+        const term = runInTerminal(
           'karkain run',
-          applyTarget(runArgs(doc.uri.fsPath), getTarget(scope)),
-          effectiveCwd(doc.uri.fsPath),
+          applyTarget(runArgsForDoc, getTarget(scope)),
+          getWorkingDirectory(scope) || effectiveCwd(doc.uri.fsPath),
           scope,
         );
+        // Remember the launch for Re-run/Stop (terminal lifetime unknown).
+        lastRunTerminal = term;
+        lastRunLaunch = { file: doc.uri.fsPath, flags: splitFlags(getRunArgs(scope)) };
+        controlCenter?.refreshAll();
+        recordAction('run', `run ${path.basename(doc.uri.fsPath)}`, null);
       }
     }),
     vscode.commands.registerCommand('karkain.clean', () => {
@@ -1074,8 +1220,12 @@ export function activate(context: vscode.ExtensionContext): KarkainExtensionApi 
       // Clean is project-scoped: it runs in the active file's project root, else
       // its workspace folder. With no active document it uses the first root,
       // which is the pre-existing single-root behaviour, unchanged.
-      const cwd = doc ? effectiveCwd(doc.uri.fsPath) : vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      const scope = configScopeForDoc(doc);
+      const cwd = doc
+        ? getWorkingDirectory(scope) || effectiveCwd(doc.uri.fsPath)
+        : vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
       runInTerminal('karkain clean', cleanArgs(), cwd, configScopeForDoc(doc));
+      recordAction('clean', 'clean', null);
     }),
     vscode.commands.registerCommand('karkain.debug', () => {
       void runDebug();
@@ -1170,6 +1320,7 @@ export function activate(context: vscode.ExtensionContext): KarkainExtensionApi 
         );
         return;
       }
+      recordAction('format', 'format document', null);
       void vscode.commands.executeCommand('editor.action.formatDocument');
     }),
     vscode.commands.registerCommand('karkain.selectTarget', async () => {
@@ -1384,6 +1535,24 @@ export function activate(context: vscode.ExtensionContext): KarkainExtensionApi 
           vscode.window.setStatusBarMessage('Karkain: language server restarted (toolchain changed)', 3000),
         );
       }
+      if (e.affectsConfiguration('karkain.debuggerPath')) {
+        void vscode.commands.executeCommand(
+          'setContext',
+          'karkain.debugAvailable',
+          resolvedDebuggerPath() !== null &&
+            vscode.extensions.getExtension('ms-vscode.cpptools') !== undefined,
+        );
+      }
+      if (
+        e.affectsConfiguration('karkain.engine') ||
+        e.affectsConfiguration('karkain.env') ||
+        e.affectsConfiguration('karkain.stdlibPath') ||
+        e.affectsConfiguration('karkain.examplesPath') ||
+        e.affectsConfiguration('karkain.target') ||
+        e.affectsConfiguration('karkain.workingDirectory')
+      ) {
+        controlCenter?.refreshAll();
+      }
     }),
     // Multi-root: roots can be added or removed while the window is open. The
     // extension keeps exactly one client, one diagnostic collection, one test
@@ -1396,6 +1565,7 @@ export function activate(context: vscode.ExtensionContext): KarkainExtensionApi 
         `workspace folders changed: ${roots.length} root(s)${roots.length > 1 ? ` (${roots.map((r) => r.name).join(', ')})` : ''}`,
       );
       updateTargetStatus();
+      controlCenter?.refreshAll();
     }),
     vscode.workspace.onDidSaveTextDocument((doc) => {
       if (testController && isTestFileUri(doc.uri)) {
@@ -1403,6 +1573,634 @@ export function activate(context: vscode.ExtensionContext): KarkainExtensionApi 
       }
     }),
   );
+  // ---- Control Center ------------------------------------------------------
+  extensionInfo.version =
+    (context.extension?.packageJSON?.version as string | undefined) ?? extensionInfo.version;
+  controlCenter = registerControlCenter(context, sharedViewState);
+  void vscode.commands.executeCommand(
+    'setContext',
+    'karkain.debugAvailable',
+    resolvedDebuggerPath() !== null && vscode.extensions.getExtension('ms-vscode.cpptools') !== undefined,
+  );
+
+  // ---- Shared health/diagnostics report ------------------------------------
+  interface IdeProbeState {
+    kind: 'ok' | 'invalid' | 'unsupported' | 'not-probed';
+    detail?: string;
+  }
+  let lastIdeInfo: IdeProbeState = { kind: 'not-probed' };
+
+  const ideProbeDetail = (r: { stdout: string; code: number }): IdeProbeState => {
+    const parsed = parseIdeInfo(r.stdout);
+    if (parsed.kind === 'ok') {
+      return { kind: 'ok' };
+    }
+    return parsed.kind === 'invalid'
+      ? { kind: 'invalid', detail: parsed.detail }
+      : { kind: 'unsupported', detail: parsed.detail };
+  };
+
+  const countRepairLog = (): number | undefined => {
+    const file = process.env.KARKAIN_LSP_REPAIR_LOG;
+    if (!file) {
+      return undefined;
+    }
+    try {
+      return fs
+        .readFileSync(file, 'utf8')
+        .split('\n')
+        .filter((l) => l.trim().length > 0).length;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const gatherHealthReport = async (): Promise<string> => {
+    const active = vscode.window.activeTextEditor?.document;
+    const scopeFolder = configScopeForDoc(active) ?? vscode.workspace.workspaceFolders?.[0];
+    const compilerPathSetting = getCompilerPath(scopeFolder);
+    const resolved = resolvedCompilerPath(scopeFolder);
+    const exists = fs.existsSync(resolved);
+    const probe = await execTool(versionArgs(), undefined, scopeFolder);
+    const parsed = classifyProbe(probe, probe.notFound);
+    const ide = await execTool(['ide', 'info'], undefined, scopeFolder);
+    lastIdeInfo = ideProbeDetail(ide);
+    const manifest = (() => {
+      const start = active?.uri.fsPath ?? scopeFolder?.uri.fsPath;
+      if (!start) {
+        return null;
+      }
+      const project = loadProject(start);
+      if (!project) {
+        return { found: false as const, problem: 'no karkain.toml found (or unreadable)' };
+      }
+      return { found: true as const, summary: describeProject(project.manifest) ?? '(unnamed project)' };
+    })();
+    const gdb = resolvedDebuggerPath(scopeFolder);
+    const roots = (vscode.workspace.workspaceFolders ?? []).map((r) => r.uri.fsPath);
+    const diagnostics = vscode.languages.getDiagnostics().reduce((n, [, d]) => n + d.length, 0);
+    const report = buildHealthReport({
+      vscodeVersion: vscode.version,
+      platform: `${process.platform}/${process.arch}`,
+      extensionVersion: extensionInfo.version,
+      compilerPathSetting,
+      compilerPathResolved: resolved,
+      compilerExists: exists,
+      probe:
+        parsed.kind === 'ok'
+          ? { ok: true, version: parsed.version, rawBanner: parsed.raw }
+          : parsed.kind === 'notFound'
+            ? { ok: false, detail: 'executable not found' }
+            : parsed.kind === 'unrecognized'
+              ? { ok: false, detail: `unrecognized banner: ${parsed.raw}` }
+              : { ok: false, detail: `exit ${parsed.code}: ${parsed.detail}` },
+      engineSetting: getEngine(scopeFolder),
+      targetSetting: getTarget(scopeFolder),
+      lsp: {
+        running: sharedViewState.lspRunning,
+        restarts: sharedViewState.lspRestarts,
+        lastError: sharedViewState.lastLspError,
+      },
+      shim: { present: fs.existsSync(path.join(__dirname, 'lsp-proxy.js')), repairsLogged: countRepairLog() },
+      workspaceRoots: roots,
+      manifest,
+      gdb: { pathSetting: getDebuggerPath(scopeFolder), found: gdb !== null },
+      stdlibPathSet: getStdlibPath(scopeFolder).length > 0,
+      examplesPathSet: getExamplesPath(scopeFolder).length > 0,
+      ideInfo: lastIdeInfo,
+      diagnosticCount: diagnostics,
+    });
+    sharedViewState.healthOverall = report.overall === 'info' ? 'ok' : report.overall;
+    controlCenter?.refreshAll();
+    return report.text;
+  };
+
+  const topicBySlug = (slug: string): string | undefined => {
+    const found = DOC_TOPICS.find((t) => t.slug === slug);
+    return found ? path.join(context.extensionUri.fsPath, 'docs', 'user', found.file) : undefined;
+  };
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('karkain.newProject', async () => {
+      const name = await vscode.window.showInputBox({
+        prompt: 'Project name (creates <parent>/<name> via `karkain init`)',
+        placeHolder: 'my-app',
+        validateInput: (v) =>
+          v.trim().length === 0
+            ? 'name is required'
+            : v.trim().startsWith('-')
+              ? 'name must not start with a dash'
+              : undefined,
+      });
+      if (!name) {
+        return;
+      }
+      const picked = await vscode.window.showOpenDialog({
+        canSelectFiles: false,
+        canSelectFolders: true,
+        canSelectMany: false,
+        openLabel: 'Select parent folder',
+      });
+      if (!picked || picked.length === 0) {
+        return;
+      }
+      const r = await currentToolchain().run(['init', name.trim()], {
+        cwd: picked[0].fsPath,
+        timeoutMs: DEFAULT_TOOLCHAIN_TIMEOUT_MS,
+      });
+      log(`$ karkain init ${name.trim()} (exit ${r.code})\n${r.combined}`);
+      if (r.code !== 0) {
+        void vscode.window.showErrorMessage(
+          `Karkain: project creation failed (exit ${r.code}). See the Karkain output channel.`,
+        );
+        return;
+      }
+      const targetDir = vscode.Uri.joinPath(picked[0], name.trim());
+      const add = await vscode.window.showInformationMessage(
+        `Karkain: project "${name.trim()}" created in ${targetDir.fsPath}.`,
+        'Add to Workspace',
+        'Open Folder',
+        'Dismiss',
+      );
+      if (add === 'Add to Workspace') {
+        vscode.workspace.updateWorkspaceFolders(vscode.workspace.workspaceFolders?.length ?? 0, 0, {
+          uri: targetDir,
+          name: name.trim(),
+        });
+      } else if (add === 'Open Folder') {
+        void vscode.commands.executeCommand('vscode.openFolder', targetDir, { forceNewWindow: true });
+      } else {
+        const marker = vscode.Uri.joinPath(targetDir, 'src', 'main.kark');
+        if (fs.existsSync(marker.fsPath)) {
+          void vscode.window.showTextDocument(await vscode.workspace.openTextDocument(marker));
+        }
+      }
+    }),
+    vscode.commands.registerCommand('karkain.openProject', async () => {
+      const picked = await vscode.window.showOpenDialog({
+        canSelectFiles: false,
+        canSelectFolders: true,
+        canSelectMany: true,
+        openLabel: 'Open Karkain project folder(s)',
+      });
+      if (!picked || picked.length === 0) {
+        return;
+      }
+      const current = vscode.workspace.workspaceFolders?.length ?? 0;
+      vscode.workspace.updateWorkspaceFolders(
+        current,
+        0,
+        ...picked.map((uri) => ({ uri, name: path.basename(uri.fsPath) })),
+      );
+    }),
+    vscode.commands.registerCommand('karkain.lint', async () => {
+      const doc = activeKarkainDocument();
+      if (!doc) {
+        return;
+      }
+      const scope = configScopeFor(doc.uri.fsPath);
+      const r = await execTool(['lint', doc.uri.fsPath], effectiveCwd(doc.uri.fsPath), scope);
+      channel?.appendLine(`$ karkain lint ${doc.uri.fsPath} (exit ${r.code})\n${r.stdout}${r.stderr}`);
+      channel?.show(true);
+      recordAction('check', `lint ${path.basename(doc.uri.fsPath)}`, r.code === 0);
+      void vscode.window.setStatusBarMessage(
+        r.code === 0 ? 'Karkain: lint passed' : `Karkain: lint reported issues (exit ${r.code})`,
+        5000,
+      );
+    }),
+    vscode.commands.registerCommand('karkain.explainError', async () => {
+      const code = await vscode.window.showInputBox({
+        prompt: 'Karkain error code to explain (from the Problems panel or check output)',
+        placeHolder: 'K001',
+        validateInput: (v) =>
+          /^(K|E|W)?[0-9]{1,4}$/i.test(v.trim()) ? undefined : 'expected a code such as K001',
+      });
+      if (!code) {
+        return;
+      }
+      const r = await execTool(['explain', code.trim().toUpperCase()]);
+      channel?.appendLine(
+        `$ karkain explain ${code.trim().toUpperCase()} (exit ${r.code})\n${r.stdout}${r.stderr}`,
+      );
+      channel?.show(true);
+    }),
+    vscode.commands.registerCommand('karkain.showConfig', async () => {
+      const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      const r = await execTool(configArgs(), ws);
+      channel?.appendLine(`$ karkain config (exit ${r.code})\n${r.stdout}${r.stderr}`);
+      channel?.show(true);
+    }),
+    vscode.commands.registerCommand('karkain.showIdeInfo', async () => {
+      const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      const r = await execTool(['ide', 'info'], ws);
+      const parsed = parseIdeInfo(r.stdout);
+      lastIdeInfo = ideProbeDetail(r);
+      const schema = parsed.kind === 'ok' ? String(parsed.info.schemaVersion) : 'unusable';
+      channel?.appendLine(
+        `$ karkain ide info (exit ${r.code}, schemaVersion: ${schema})\n${r.stdout}${r.stderr}`,
+      );
+      channel?.show(true);
+      if (parsed.kind === 'ok') {
+        log(`ide info contract accepted (schemaVersion ${parsed.info.schemaVersion})`);
+      } else {
+        log(
+          `ide info contract not usable (${parsed.kind}): the extension falls back to verified argv vectors`,
+        );
+      }
+    }),
+    vscode.commands.registerCommand('karkain.selectEngine', async () => {
+      const scopeFolder = configScopeForDoc(vscode.window.activeTextEditor?.document);
+      const current = getEngine(scopeFolder);
+      const pick = await vscode.window.showQuickPick(
+        [
+          {
+            label: '(default) Toolchain default',
+            description: 'kcc on 1.2.0 — needs a C compiler to bootstrap',
+            value: '""',
+          },
+          { label: 'kcc', description: 'Self-hosted engine, explicit', value: 'kcc' },
+          { label: 'go', description: 'Go front end — required for `check --format=json`', value: 'go' },
+        ],
+        {
+          placeHolder: scopeFolder
+            ? `Engine for ${scopeFolder.name} (current: ${current || 'default'})`
+            : `Engine for the workspace (current: ${current || 'default'})`,
+        },
+      );
+      if (!pick) {
+        return;
+      }
+      const value = pick.value === '""' ? '' : pick.value;
+      const multiRoot = (vscode.workspace.workspaceFolders?.length ?? 0) > 1;
+      const target =
+        multiRoot && scopeFolder
+          ? vscode.ConfigurationTarget.WorkspaceFolder
+          : vscode.workspace.workspaceFolders?.[0]
+            ? vscode.ConfigurationTarget.Workspace
+            : vscode.ConfigurationTarget.Global;
+      await vscode.workspace.getConfiguration('karkain', scopeFolder).update('engine', value, target);
+      log(`karkain.engine set to '${value || '(default)'}'${scopeFolder ? ` for ${scopeFolder.name}` : ''}`);
+      controlCenter?.refreshAll();
+      void vscode.window.setStatusBarMessage(`Karkain: engine set to ${value || '(default)'}`, 3000);
+    }),
+    vscode.commands.registerCommand('karkain.workspaceBuild', async () => {
+      const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      const yes = await vscode.window.showInformationMessage(
+        'Build all workspace members in dependency order? This can take a while.',
+        'Build',
+        'Cancel',
+      );
+      if (yes !== 'Build') {
+        return;
+      }
+      runInTerminal('karkain workspace build', ['workspace', 'build'], ws);
+      recordAction('build', 'workspace build', null);
+    }),
+    vscode.commands.registerCommand('karkain.workspaceTest', async () => {
+      const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      runInTerminal('karkain workspace test', ['workspace', 'test'], ws);
+      recordAction('test', 'workspace test', null);
+    }),
+    vscode.commands.registerCommand('karkain.workspaceCheck', async () => {
+      const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      const r = await execTool(['workspace', 'check'], ws);
+      channel?.appendLine(`$ karkain workspace check (exit ${r.code})\n${r.stdout}${r.stderr}`);
+      channel?.show(true);
+      recordAction('check', 'workspace check', r.code === 0);
+      void vscode.window.setStatusBarMessage(
+        r.code === 0 ? 'Karkain: workspace check passed' : `Karkain: workspace check failed (exit ${r.code})`,
+        5000,
+      );
+    }),
+    vscode.commands.registerCommand('karkain.workspaceTree', async () => {
+      const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      const r = await execTool(['workspace', 'graph'], ws);
+      channel?.appendLine(`$ karkain workspace graph (exit ${r.code})\n${r.stdout}${r.stderr}`);
+      channel?.show(true);
+    }),
+    vscode.commands.registerCommand('karkain.addPackage', async () => {
+      const name = await vscode.window.showInputBox({
+        prompt: 'Package name (Karkain registry)',
+        placeHolder: 'http3',
+        validateInput: (v) =>
+          v.trim().length === 0
+            ? 'name is required'
+            : v.trim().startsWith('-')
+              ? 'name must not start with a dash'
+              : undefined,
+      });
+      if (!name) {
+        return;
+      }
+      const version = await vscode.window.showInputBox({
+        prompt: 'Version (optional — semver or ^range)',
+        placeHolder: '^0.14.0',
+      });
+      const versionArg = version?.trim() ? [version.trim()] : [];
+      const confirm = await vscode.window.showInformationMessage(
+        `Add dependency "${name.trim()}"${versionArg.length ? ` ${version!.trim()}` : ''}? This updates karkain.toml and karkain.lock.`,
+        'Add',
+        'Cancel',
+      );
+      if (confirm !== 'Add') {
+        return;
+      }
+      const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      const r = await currentToolchain().run(['add', name.trim(), ...versionArg], {
+        cwd: ws,
+        timeoutMs: DEFAULT_TOOLCHAIN_TIMEOUT_MS,
+      });
+      channel?.appendLine(
+        `$ karkain add ${name.trim()} ${versionArg.join(' ')} (exit ${r.code})\n${r.combined}`,
+      );
+      channel?.show(true);
+      void vscode.window.setStatusBarMessage(
+        r.code === 0 ? `Karkain: added ${name.trim()}` : `Karkain: add failed (exit ${r.code})`,
+        5000,
+      );
+    }),
+    vscode.commands.registerCommand('karkain.fetchPackages', async () => {
+      const confirm = await vscode.window.showInformationMessage(
+        'Fetch resolved dependencies per karkain.lock? This may use the network.',
+        'Fetch',
+        'Cancel',
+      );
+      if (confirm !== 'Fetch') {
+        return;
+      }
+      const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      const r = await currentToolchain().run(['fetch'], { cwd: ws, timeoutMs: DEFAULT_TOOLCHAIN_TIMEOUT_MS });
+      channel?.appendLine(`$ karkain fetch (exit ${r.code})\n${r.combined}`);
+      channel?.show(true);
+      void vscode.window.setStatusBarMessage(
+        r.code === 0 ? 'Karkain: dependencies fetched' : `Karkain: fetch failed (exit ${r.code})`,
+        5000,
+      );
+    }),
+    vscode.commands.registerCommand('karkain.runWithOptions', async () => {
+      const doc = activeKarkainDocument();
+      if (!doc) {
+        return;
+      }
+      const scope = configScopeFor(doc.uri.fsPath);
+      const flags = await vscode.window.showInputBox({
+        prompt: 'Compiler CLI flags for this run (program arguments are NOT forwarded by the v1.2.0 CLI)',
+        placeHolder: '--verbose',
+      });
+      if (flags === undefined) {
+        return;
+      }
+      const split = splitFlags(flags);
+      const term = runInTerminal(
+        'karkain run',
+        applyTarget([...runArgs(doc.uri.fsPath), ...split], getTarget(scope)),
+        getWorkingDirectory(scope) || effectiveCwd(doc.uri.fsPath),
+        scope,
+      );
+      lastRunTerminal = term;
+      lastRunLaunch = { file: doc.uri.fsPath, flags: split };
+      recordAction('run', `run ${path.basename(doc.uri.fsPath)} (flags)`, null);
+    }),
+    vscode.commands.registerCommand('karkain.rerunLastRun', async () => {
+      if (!lastRunLaunch) {
+        void vscode.window.showInformationMessage('Karkain: no run launched yet in this session.');
+        return;
+      }
+      const docPath = lastRunLaunch.file;
+      const scope = configScopeFor(docPath);
+      const term = runInTerminal(
+        'karkain run',
+        applyTarget([...runArgs(docPath), ...lastRunLaunch.flags], getTarget(scope)),
+        getWorkingDirectory(scope) || effectiveCwd(docPath),
+        scope,
+      );
+      lastRunTerminal = term;
+      recordAction('run', `run ${path.basename(docPath)} (re-run)`, null);
+    }),
+    vscode.commands.registerCommand('karkain.stopRun', () => {
+      if (lastRunTerminal) {
+        lastRunTerminal.sendText('\x03');
+        void vscode.window.setStatusBarMessage('Karkain: interrupt (Ctrl+C) sent to the run terminal', 4000);
+      } else {
+        void vscode.window.showInformationMessage('Karkain: no run terminal from this session to stop.');
+      }
+    }),
+    vscode.commands.registerCommand('karkain.recentActions', async () => {
+      const actions = controlCenter?.recentActions.list() ?? [];
+      if (actions.length === 0) {
+        void vscode.window.showInformationMessage('Karkain: no actions recorded yet.');
+        return;
+      }
+      const kindToCommand: Record<string, string> = {
+        check: 'karkain.check',
+        build: 'karkain.build',
+        run: 'karkain.run',
+        test: 'karkain.test',
+        debug: 'karkain.debug',
+        format: 'karkain.formatDocument',
+        clean: 'karkain.clean',
+      };
+      const pick = await vscode.window.showQuickPick(
+        actions.map((a) => ({
+          label: a.summary,
+          description: `${a.ok === null ? 'launched' : a.ok ? 'ok' : 'FAILED'} · ${new Date(a.at).toLocaleTimeString()}`,
+          action: a,
+        })),
+        { placeHolder: 'Recent actions (pick to run the matching action again)' },
+      );
+      if (pick && kindToCommand[pick.action.kind]) {
+        await vscode.commands.executeCommand(kindToCommand[pick.action.kind]);
+      }
+    }),
+    vscode.commands.registerCommand('karkain.openDocumentation', async () => {
+      const pick = await vscode.window.showQuickPick(
+        DOC_TOPICS.map((t) => ({ label: t.label, description: t.description, topic: t })),
+        { placeHolder: 'Karkain documentation' },
+      );
+      if (pick) {
+        const file = path.join(context.extensionUri.fsPath, 'docs', 'user', pick.topic.file);
+        await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file), {
+          preview: true,
+        });
+      }
+    }),
+    vscode.commands.registerCommand('karkain.openDocumentationTopic', async (resource?: string) => {
+      const file = typeof resource === 'string' ? resource : topicBySlug('getting-started');
+      if (file && fs.existsSync(file)) {
+        await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file), {
+          preview: true,
+        });
+      } else {
+        void vscode.window.showWarningMessage('Karkain: documentation topic not found in this build.');
+      }
+    }),
+    vscode.commands.registerCommand('karkain.openManifest', async (rootArg?: string) => {
+      const active = vscode.window.activeTextEditor?.document;
+      const root =
+        rootArg ??
+        (active ? findProjectRoot(active.uri.fsPath) : undefined) ??
+        vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!root) {
+        void vscode.window.showWarningMessage('Karkain: no project found (no karkain.toml).');
+        return;
+      }
+      const file = path.join(root, 'karkain.toml');
+      if (!fs.existsSync(file)) {
+        void vscode.window.showWarningMessage(`Karkain: no karkain.toml in ${root}.`);
+        return;
+      }
+      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file));
+    }),
+    vscode.commands.registerCommand('karkain.copyCommandUsage', async (usage?: string) => {
+      if (typeof usage === 'string' && usage.length > 0) {
+        await vscode.env.clipboard.writeText(usage);
+        void vscode.window.setStatusBarMessage('Karkain: command copied to clipboard', 3000);
+      }
+    }),
+    vscode.commands.registerCommand('karkain.filterCommands', async (initial?: string) => {
+      const provider = controlCenter?.views.commands;
+      if (!provider) {
+        return;
+      }
+      const value = await vscode.window.showInputBox({
+        prompt: 'Filter compiler commands (empty clears the filter)',
+        value: typeof initial === 'string' ? initial : provider.currentFilter,
+      });
+      if (value === undefined) {
+        return;
+      }
+      provider.setFilter(value);
+    }),
+    vscode.commands.registerCommand('karkain.filterExamples', async (initial?: string) => {
+      const provider = controlCenter?.views.examples;
+      if (!provider) {
+        return;
+      }
+      const value = await vscode.window.showInputBox({
+        prompt: 'Filter examples (empty clears the filter)',
+        value: typeof initial === 'string' ? initial : provider.currentFilter,
+      });
+      if (value === undefined) {
+        return;
+      }
+      provider.setFilter(value);
+    }),
+    vscode.commands.registerCommand('karkain.setTraceLevel', async () => {
+      const current = getTraceServer();
+      const pick = await vscode.window.showQuickPick(
+        [
+          { label: 'off', description: 'no server tracing', value: 'off' },
+          {
+            label: 'messages',
+            description: 'log message summaries to the output channel',
+            value: 'messages',
+          },
+          { label: 'verbose', description: 'log full LSP payloads (very noisy)', value: 'verbose' },
+        ],
+        { placeHolder: `Language server trace (current: ${current})` },
+      );
+      if (!pick) {
+        return;
+      }
+      const scopeFolder = configScopeForDoc(vscode.window.activeTextEditor?.document);
+      const multiRoot = (vscode.workspace.workspaceFolders?.length ?? 0) > 1;
+      const target =
+        multiRoot && scopeFolder
+          ? vscode.ConfigurationTarget.WorkspaceFolder
+          : vscode.workspace.workspaceFolders?.[0]
+            ? vscode.ConfigurationTarget.Workspace
+            : vscode.ConfigurationTarget.Global;
+      await vscode.workspace
+        .getConfiguration('karkain', scopeFolder)
+        .update('trace.server', pick.value, target);
+      applyTraceLevel();
+      void vscode.window.setStatusBarMessage(`Karkain: LSP trace set to ${pick.value}`, 3000);
+    }),
+    vscode.commands.registerCommand('karkain.formatCheck', async () => {
+      const doc = activeKarkainDocument();
+      if (!doc) {
+        return;
+      }
+      const scope = configScopeFor(doc.uri.fsPath);
+      const r = await execTool(['fmt', '--check', doc.uri.fsPath], effectiveCwd(doc.uri.fsPath), scope);
+      channel?.appendLine(`$ karkain fmt --check ${doc.uri.fsPath} (exit ${r.code})\n${r.stdout}${r.stderr}`);
+      channel?.show(true);
+      recordAction('format', `fmt --check ${path.basename(doc.uri.fsPath)}`, r.code === 0);
+      void vscode.window.setStatusBarMessage(
+        r.code === 0
+          ? 'Karkain: formatting OK'
+          : `Karkain: file is not canonically formatted (exit ${r.code})`,
+        5000,
+      );
+    }),
+    vscode.commands.registerCommand('karkain.debugPrerequisites', async () => {
+      const scopeFolder = configScopeForDoc(vscode.window.activeTextEditor?.document);
+      const gdb = resolvedDebuggerPath(scopeFolder);
+      const cppdbg = vscode.extensions.getExtension('ms-vscode.cpptools');
+      channel?.appendLine('Karkain — debug prerequisites');
+      channel?.appendLine(`GDB (karkain.debuggerPath): ${gdb ?? 'NOT FOUND'}`);
+      channel?.appendLine(
+        `C/C++ extension (ms-vscode.cpptools): ${
+          cppdbg ? (cppdbg.isActive ? 'installed and active' : 'installed but not active') : 'NOT INSTALLED'
+        }`,
+      );
+      channel?.appendLine(
+        'Build: debugging uses `karkain build -g` (debug symbols), which needs a C toolchain.',
+      );
+      channel?.appendLine('Target: debugging always uses a host build regardless of karkain.target.');
+      channel?.appendLine('Test binaries cannot be debugged (no main, do not link).');
+      channel?.show(true);
+      const problems: string[] = [];
+      if (!gdb) {
+        problems.push('GDB');
+      }
+      if (!cppdbg) {
+        problems.push('C/C++ extension');
+      }
+      if (problems.length > 0) {
+        void vscode.window.showWarningMessage(
+          `Karkain: debug prerequisites missing: ${problems.join(', ')}. See the Karkain output channel for details.`,
+        );
+      } else {
+        void vscode.window.showInformationMessage('Karkain: debug prerequisites look good.');
+      }
+    }),
+    vscode.commands.registerCommand('karkain.runHealthCheck', async () => {
+      const text = await gatherHealthReport();
+      channel?.appendLine(`\n${text}\n`);
+      channel?.show(true);
+      void vscode.window.showInformationMessage(
+        sharedViewState.healthOverall === 'ok'
+          ? 'Karkain: health check passed. See the Karkain output channel for the full report.'
+          : `Karkain: health check finished with "${sharedViewState.healthOverall}". See the Karkain output channel for the full report.`,
+      );
+    }),
+    vscode.commands.registerCommand('karkain.copyHealthReport', async () => {
+      const text = await gatherHealthReport();
+      await vscode.env.clipboard.writeText(text);
+      void vscode.window.setStatusBarMessage('Karkain: diagnostic report copied to clipboard', 4000);
+    }),
+    vscode.commands.registerCommand('karkain.exportHealthReport', async () => {
+      const text = await gatherHealthReport();
+      const target = await vscode.window.showSaveDialog({
+        defaultUri: vscode.Uri.file(path.join(os.tmpdir(), 'karkain-diagnostic-report.md')),
+        filters: { Markdown: ['md'], Text: ['txt'] },
+      });
+      if (!target) {
+        return;
+      }
+      try {
+        await vscode.workspace.fs.writeFile(target, Buffer.from(text, 'utf8'));
+        void vscode.window.setStatusBarMessage(
+          `Karkain: diagnostic report written to ${target.fsPath}`,
+          5000,
+        );
+      } catch (e) {
+        void vscode.window.showErrorMessage(`Karkain: could not write the report: ${(e as Error).message}`);
+      }
+    }),
+  );
+
   const testWatcher = vscode.workspace.createFileSystemWatcher('**/*_test.kark');
   context.subscriptions.push(
     testWatcher,
@@ -1422,6 +2220,7 @@ export function activate(context: vscode.ExtensionContext): KarkainExtensionApi 
 export function deactivate(): Promise<void> | undefined {
   const c = client;
   client = null;
+  sharedViewState.lspRunning = false;
   if (!c) {
     return undefined;
   }

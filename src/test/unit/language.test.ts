@@ -353,6 +353,8 @@ describe('language assets', () => {
         'karkain.check',
         'karkain.build',
         'karkain.run',
+        'karkain.lint',
+        'karkain.explainError',
         'karkain.test',
         'karkain.debug',
       ]);

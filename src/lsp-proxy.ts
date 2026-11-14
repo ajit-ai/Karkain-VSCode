@@ -31,6 +31,7 @@
 //     (kill, exit code) is preserved as closely as a wrapper allows.
 
 import { spawn } from 'child_process';
+import { appendFileSync } from 'fs';
 import { extractFrames, frameMessage, repairServerMessageBody } from './jsonrpc-repair';
 
 const argv = process.argv.slice(2);
@@ -85,6 +86,24 @@ let pending: Buffer = Buffer.alloc(0);
 let repairs = 0;
 let passthroughAnnounced = false;
 
+// Optional repair-activity log. Set KARKAIN_LSP_REPAIR_LOG=/path/to/file to
+// append one line per repaired response (used by the extension's health
+// check). Best-effort: any failure is reported once and then ignored; the
+// repair path itself never depends on the log being writable.
+const repairLogPath = process.env.KARKAIN_LSP_REPAIR_LOG;
+let repairLogBroken = false;
+function noteRepair(note: string | undefined): void {
+  if (!repairLogPath || repairLogBroken) {
+    return;
+  }
+  try {
+    appendFileSync(repairLogPath, `${new Date().toISOString()} ${note ?? 'repair'}\n`);
+  } catch (e) {
+    repairLogBroken = true;
+    process.stderr.write(`[lsp-proxy] repair log unwritable (${(e as Error).message}); disabling it\n`);
+  }
+}
+
 childStdout.on('data', (chunk: Buffer) => {
   const input = pending.length === 0 ? chunk : Buffer.concat([pending, chunk]);
 
@@ -115,6 +134,7 @@ childStdout.on('data', (chunk: Buffer) => {
     const result = repairServerMessageBody(body);
     if (result.outcome === 'repaired') {
       repairs += 1;
+      noteRepair(result.note);
       process.stderr.write(
         `[lsp-proxy] repaired malformed server response: ${result.note} (repair #${repairs})\n`,
       );
