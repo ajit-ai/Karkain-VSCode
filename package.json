@@ -1,8 +1,8 @@
 {
   "name": "karkain",
   "displayName": "Karkain Language Tools",
-  "description": "Development environment for the Karkain programming language (.kark): syntax highlighting, Karkain CLI integration (check, build, run, format) and Karkain Language Server (karkain lsp) intelligence. Requires the Karkain 1.1.0 toolchain.",
-  "version": "0.9.1",
+  "description": "Development environment for the Karkain programming language (.kark): syntax highlighting, Karkain CLI integration (check, build, run, format) and Karkain Language Server (karkain lsp) intelligence. Requires Karkain 1.1.0 or newer (verified against 1.2.0).",
+  "version": "1.0.0",
   "publisher": "karkain",
   "license": "MIT",
   "icon": "images/karkain-icon.png",
@@ -37,6 +37,13 @@
   "main": "./out/extension.js",
   "activationEvents": [
     "onLanguage:karkain",
+    "onView:karkain.overview",
+    "onView:karkain.quickActions",
+    "onView:karkain.projects",
+    "onView:karkain.commands",
+    "onView:karkain.stdlib",
+    "onView:karkain.examples",
+    "onView:karkain.docs",
     "onCommand:karkain.check",
     "onCommand:karkain.build",
     "onCommand:karkain.run",
@@ -45,9 +52,36 @@
     "onCommand:karkain.debug",
     "onCommand:karkain.selectTarget",
     "onCommand:karkain.selectToolchain",
+    "onCommand:karkain.selectEngine",
     "onCommand:karkain.formatDocument",
     "onCommand:karkain.showEnvironment",
-    "onCommand:karkain.restartLanguageServer"
+    "onCommand:karkain.restartLanguageServer",
+    "onCommand:karkain.newProject",
+    "onCommand:karkain.openProject",
+    "onCommand:karkain.lint",
+    "onCommand:karkain.explainError",
+    "onCommand:karkain.showConfig",
+    "onCommand:karkain.showIdeInfo",
+    "onCommand:karkain.workspaceBuild",
+    "onCommand:karkain.workspaceTest",
+    "onCommand:karkain.workspaceCheck",
+    "onCommand:karkain.workspaceTree",
+    "onCommand:karkain.addPackage",
+    "onCommand:karkain.fetchPackages",
+    "onCommand:karkain.runWithOptions",
+    "onCommand:karkain.rerunLastRun",
+    "onCommand:karkain.stopRun",
+    "onCommand:karkain.openDocumentation",
+    "onCommand:karkain.runHealthCheck",
+    "onCommand:karkain.exportHealthReport",
+    "onCommand:karkain.copyHealthReport",
+    "onCommand:karkain.debugPrerequisites",
+    "onCommand:karkain.filterCommands",
+    "onCommand:karkain.filterExamples",
+    "onCommand:karkain.setTraceLevel",
+    "onCommand:karkain.openManifest",
+    "onCommand:karkain.recentActions",
+    "onCommand:karkain.formatCheck"
   ],
   "contributes": {
     "languages": [
@@ -86,7 +120,8 @@
       },
       {
         "command": "karkain.run",
-        "title": "Karkain: Run File"
+        "title": "Karkain: Run File",
+        "icon": "$(play)"
       },
       {
         "command": "karkain.clean",
@@ -98,7 +133,8 @@
       },
       {
         "command": "karkain.debug",
-        "title": "Karkain: Debug File (gdb)"
+        "title": "Karkain: Debug File (gdb)",
+        "icon": "$(debug-start)"
       },
       {
         "command": "karkain.selectTarget",
@@ -119,6 +155,124 @@
       {
         "command": "karkain.restartLanguageServer",
         "title": "Karkain: Restart Language Server"
+      },
+      {
+        "command": "karkain.newProject",
+        "title": "Karkain: New Project…"
+      },
+      {
+        "command": "karkain.openProject",
+        "title": "Karkain: Open Project…"
+      },
+      {
+        "command": "karkain.lint",
+        "title": "Karkain: Lint File"
+      },
+      {
+        "command": "karkain.explainError",
+        "title": "Karkain: Explain Error Code…"
+      },
+      {
+        "command": "karkain.showConfig",
+        "title": "Karkain: Show Toolchain Configuration"
+      },
+      {
+        "command": "karkain.showIdeInfo",
+        "title": "Karkain: Show Toolchain Contract (ide info)"
+      },
+      {
+        "command": "karkain.selectEngine",
+        "title": "Karkain: Select Compiler Engine"
+      },
+      {
+        "command": "karkain.workspaceBuild",
+        "title": "Karkain: Workspace Build"
+      },
+      {
+        "command": "karkain.workspaceTest",
+        "title": "Karkain: Workspace Test"
+      },
+      {
+        "command": "karkain.workspaceCheck",
+        "title": "Karkain: Workspace Check"
+      },
+      {
+        "command": "karkain.workspaceTree",
+        "title": "Karkain: Workspace Dependency Graph"
+      },
+      {
+        "command": "karkain.addPackage",
+        "title": "Karkain: Add Package…"
+      },
+      {
+        "command": "karkain.fetchPackages",
+        "title": "Karkain: Fetch Dependencies"
+      },
+      {
+        "command": "karkain.runWithOptions",
+        "title": "Karkain: Run File with Options…"
+      },
+      {
+        "command": "karkain.rerunLastRun",
+        "title": "Karkain: Re-run Last Run"
+      },
+      {
+        "command": "karkain.stopRun",
+        "title": "Karkain: Stop Run"
+      },
+      {
+        "command": "karkain.recentActions",
+        "title": "Karkain: Recent Actions…"
+      },
+      {
+        "command": "karkain.openDocumentation",
+        "title": "Karkain: Open Documentation"
+      },
+      {
+        "command": "karkain.openDocumentationTopic",
+        "title": "Karkain: Open Documentation Topic…"
+      },
+      {
+        "command": "karkain.openManifest",
+        "title": "Karkain: Open Project Manifest"
+      },
+      {
+        "command": "karkain.runHealthCheck",
+        "title": "Karkain: Run Health Check"
+      },
+      {
+        "command": "karkain.exportHealthReport",
+        "title": "Karkain: Export Diagnostic Report"
+      },
+      {
+        "command": "karkain.copyHealthReport",
+        "title": "Karkain: Copy Diagnostic Report"
+      },
+      {
+        "command": "karkain.debugPrerequisites",
+        "title": "Karkain: Check Debug Prerequisites"
+      },
+      {
+        "command": "karkain.filterCommands",
+        "title": "Karkain: Filter Compiler Commands…",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "karkain.filterExamples",
+        "title": "Karkain: Filter Examples…",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "karkain.copyCommandUsage",
+        "title": "Karkain: Copy Command Usage"
+      },
+      {
+        "command": "karkain.setTraceLevel",
+        "title": "Karkain: Set Language Server Trace Level…"
+      },
+      {
+        "command": "karkain.formatCheck",
+        "title": "Karkain: Verify Formatting (fmt --check)"
       }
     ],
     "menus": {
@@ -139,6 +293,16 @@
           "group": "karkain"
         },
         {
+          "command": "karkain.lint",
+          "when": "editorLangId == karkain",
+          "group": "karkain"
+        },
+        {
+          "command": "karkain.explainError",
+          "when": "editorLangId == karkain",
+          "group": "1_modification"
+        },
+        {
           "command": "karkain.test",
           "when": "editorLangId == karkain",
           "group": "karkain"
@@ -148,8 +312,122 @@
           "when": "editorLangId == karkain",
           "group": "karkain"
         }
+      ],
+      "editor/title": [
+        {
+          "command": "karkain.run",
+          "when": "editorLangId == karkain",
+          "group": "navigation"
+        },
+        {
+          "command": "karkain.debug",
+          "when": "editorLangId == karkain && karkain.debugAvailable",
+          "group": "navigation"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "karkain.run",
+          "when": "resourceExtname == .kark || resourceFilename =~ /\\.kark$/i",
+          "group": "karkain"
+        },
+        {
+          "command": "karkain.build",
+          "when": "resourceExtname == .kark || resourceFilename =~ /\\.kark$/i",
+          "group": "karkain"
+        },
+        {
+          "command": "karkain.lint",
+          "when": "resourceExtname == .kark || resourceFilename =~ /\\.kark$/i",
+          "group": "karkain"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "karkain.filterCommands",
+          "when": "view == karkain.commands",
+          "group": "navigation"
+        },
+        {
+          "command": "karkain.filterExamples",
+          "when": "view == karkain.examples",
+          "group": "navigation"
+        }
       ]
     },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "karkain",
+          "title": "Karkain",
+          "icon": "./images/karkain.svg"
+        }
+      ]
+    },
+    "views": {
+      "karkain": [
+        {
+          "id": "karkain.overview",
+          "name": "Overview"
+        },
+        {
+          "id": "karkain.quickActions",
+          "name": "Quick Actions"
+        },
+        {
+          "id": "karkain.projects",
+          "name": "Projects & Files"
+        },
+        {
+          "id": "karkain.commands",
+          "name": "Compiler Commands"
+        },
+        {
+          "id": "karkain.stdlib",
+          "name": "Standard Library"
+        },
+        {
+          "id": "karkain.examples",
+          "name": "Examples"
+        },
+        {
+          "id": "karkain.docs",
+          "name": "Documentation"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "karkain.run",
+        "key": "ctrl+alt+r",
+        "mac": "cmd+alt+r",
+        "when": "editorTextFocus && editorLangId == karkain"
+      },
+      {
+        "command": "karkain.build",
+        "key": "ctrl+alt+b",
+        "mac": "cmd+alt+b",
+        "when": "editorTextFocus && editorLangId == karkain"
+      },
+      {
+        "command": "karkain.check",
+        "key": "ctrl+alt+c",
+        "mac": "cmd+alt+c",
+        "when": "editorTextFocus && editorLangId == karkain"
+      },
+      {
+        "command": "karkain.test",
+        "key": "ctrl+alt+t",
+        "mac": "cmd+alt+t",
+        "when": "editorTextFocus && editorLangId == karkain"
+      },
+      {
+        "command": "karkain.debug",
+        "key": "ctrl+alt+d",
+        "mac": "cmd+alt+d",
+        "when": "editorTextFocus && editorLangId == karkain"
+      }
+    ],
     "taskDefinitions": [
       {
         "type": "karkain",
@@ -180,22 +458,89 @@
         "karkain.compilerPath": {
           "type": "string",
           "default": "karkain",
-          "description": "Path to the Karkain compiler executable (absolute path or a name resolved via PATH)."
+          "scope": "resource",
+          "description": "Path to the Karkain compiler executable (absolute path or a name resolved via PATH). In a multi-root window this can be set per folder."
         },
         "karkain.debuggerPath": {
           "type": "string",
           "default": "gdb",
-          "description": "Path to the GDB executable used for native debugging of Karkain-built binaries (absolute path or a name resolved via PATH)."
+          "scope": "resource",
+          "description": "Path to the GDB executable used for native debugging of Karkain-built binaries (absolute path or a name resolved via PATH). In a multi-root window this can be set per folder."
         },
         "karkain.formatOnSave": {
           "type": "boolean",
           "default": false,
-          "description": "Format .kark documents on save using `karkain fmt`. Requires Karkain 1.1.0 or newer."
+          "scope": "resource",
+          "description": "Format .kark documents on save using `karkain fmt`. Requires Karkain 1.1.0 or newer. In a multi-root window this can be set per folder."
         },
         "karkain.target": {
           "type": "string",
           "default": "",
-          "description": "Target triple passed as --target to build/run (empty means the host default). See `karkain target` for supported values."
+          "scope": "resource",
+          "description": "Target triple passed as --target to build/run (empty means the host default). See `karkain target` for supported values. In a multi-root window this can be set per folder."
+        },
+        "karkain.engine": {
+          "type": "string",
+          "enum": [
+            "",
+            "kcc",
+            "go"
+          ],
+          "enumDescriptions": [
+            "Toolchain default (kcc on 1.2.0; needs a C compiler to bootstrap source builds).",
+            "Self-hosted kcc engine (explicit).",
+            "Go front end — required for `check --format=json` and used by the LSP and test runner."
+          ],
+          "default": "",
+          "scope": "resource",
+          "description": "Compiler engine selected via KARKAIN_ENGINE for spawned compiler processes. The extension's diagnostics path probes both engines automatically; this setting affects direct CLI invocations (check/build/run in terminals, showEnvironment)."
+        },
+        "karkain.runArgs": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Extra flags appended to `karkain run` invocations (e.g. `--verbose`). Passed to the compiler CLI, not the compiled program — the v1.2.0 CLI does not forward program arguments."
+        },
+        "karkain.buildArgs": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Extra flags appended to `karkain build` invocations (e.g. `--verbose`, `-c`)."
+        },
+        "karkain.env": {
+          "type": "object",
+          "default": {},
+          "scope": "resource",
+          "description": "Extra environment variables merged into compiler processes and run terminals (e.g. KARKAIN_KCC). Values must be strings."
+        },
+        "karkain.workingDirectory": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Override the working directory used by run/build (empty = automatic: nearest karkain.toml root, else the owning workspace folder)."
+        },
+        "karkain.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "scope": "resource",
+          "description": "Trace level for the Karkain language server; messages appear in the Karkain Language Server output channel."
+        },
+        "karkain.stdlibPath": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Path to a local stdlib/ directory (e.g. from a Karkain source checkout) for Standard Library navigation in the Control Center. Empty hides module browsing."
+        },
+        "karkain.examplesPath": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Path to a local examples/ directory (e.g. from a Karkain source checkout) for the Examples view in the Control Center. Empty hides the catalogue."
         }
       }
     }
@@ -210,6 +555,7 @@
     "test:unit": "npm run compile && mocha",
     "test:integration": "npm run compile && node scripts/run-integration.mjs",
     "test:lsp-smoke": "node scripts/lsp-smoke.mjs",
+    "test:lsp-smoke:proxy": "node scripts/lsp-smoke.mjs --through-proxy",
     "test:toolchain-smoke": "node scripts/toolchain-smoke.mjs",
     "package": "vsce package"
   },

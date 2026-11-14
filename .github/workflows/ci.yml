@@ -7,10 +7,53 @@ on:
     branches: [main]
 
 jobs:
+  integration:
+    # VS Code extension-host suite. Needs a real (headless) Electron, which is
+    # why this is a separate job from `validate`: the unit suite needs no editor
+    # process and must stay fast on every push.
+    #
+    # Linux spawns the suite under xvfb-run (Electron cannot start without a
+    # display); macOS/Windows launch it directly. Both paths run the full
+    # extension-host suite — neither skips a single test.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: npm
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: integration-logs-${{ matrix.os }}
+          path: '**/*.log'
+          if-no-files-found: ignore
+      - run: npm ci
+      # Linux: Electron needs an X display, so the runner runs under xvfb-run.
+      # The X server arguments are passed as ONE quoted argument — splitting
+      # them made xvfb-run treat `0` as the command ("0: not found").
+      - name: extension-host suite (Linux, xvfb)
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1024x768x24" npm run test:integration
+        env:
+          # Always take the portable path in CI: a locally installed VS Code
+          # would not match the pinned build the suite is written against.
+          KARKAIN_VSCODE_DOWNLOAD: '1'
+      - name: extension-host suite (Windows/macOS)
+        if: runner.os != 'Linux'
+        run: npm run test:integration
+        env:
+          # Always take the portable path in CI: a locally installed VS Code
+          # would not match the pinned build the suite is written against.
+          KARKAIN_VSCODE_DOWNLOAD: '1'
+
   validate:
-    # NOTE (Phase 1): unit + packaging only. VS Code integration tests land in
-    # Phase 3 together with a real Karkain 1.1.0 toolchain build; no fake-green
-    # integration job is included before then.
+    # Unit + packaging on every supported OS. The VS Code integration suite runs
+    # in the `integration` job above.
     strategy:
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]

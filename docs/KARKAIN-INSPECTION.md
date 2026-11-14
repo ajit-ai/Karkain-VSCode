@@ -128,18 +128,128 @@ and closes the Problems-panel gap via `check --format=json`.
 
 ## 8. Local (v1.0.0) vs main (1.1.0) drift — verified live
 
-| Behavior              | Local v1.0.0                                    | Main 1.1.0                             |
-| --------------------- | ----------------------------------------------- | -------------------------------------- |
-| `check --format=json` | `Unknown flag` (exit 2)                         | supported                              |
-| `fmt` command         | absent (`Input file must be a .kark file: fmt`) | supported                              |
-| `let = 42` in `check` | passes (exit 0)                                 | rejected (exit 3, Phase 117 hardening) |
-| `explain K002`        | expects `E-*-*` codes                           | `K001..K114+K121/K122/K127` numeric    |
-| `ide info`            | requires `.kark` arg shape                      | machine-readable contract              |
-| `lsp`                 | present                                         | present (v2 semantic, Phase 136)       |
+| Behavior              | Local v1.0.0                                    | Main 1.1.0                                        |
+| --------------------- | ----------------------------------------------- | ------------------------------------------------- |
+| `check --format=json` | `Unknown flag` (exit 2)                         | supported                                         |
+| `fmt` command         | absent (`Input file must be a .kark file: fmt`) | supported                                         |
+| `let = 42` in `check` | passes (exit 0)                                 | rejected (exit 3, Phase 117 hardening)            |
+| `explain K002`        | expects `E-*-*` codes                           | `K001..K114+K121/K122/K127` numeric               |
+| `ide info`            | not a subcommand at all in v1.0.0               | **present in v1.2.0** (schemaVersion 1, see §8.2) |
+| `lsp`                 | present                                         | present (v2 semantic, Phase 136)                  |
 
 Consequence: structured Problems integration requires ≥ 1.1.0; the extension
 probes `karkain --version` at activation and degrades honestly on older
 toolchains (warning + raw output channel, never fabricated diagnostics).
+
+### 8.1 `ide info` is absent in v1.0.0, not merely differently shaped
+
+Re-verified 2026-10-03 against `C:\Users\Lenovo\go\bin\karkain.exe`, which
+reports `Karkain Compiler v1.0.0 (windows/amd64, LSP Engine & IDE Tooling)`:
+
+| Invocation                       | Result                                        | Exit |
+| -------------------------------- | --------------------------------------------- | ---- |
+| `karkain ide info`               | `Input file must be a .kark file: ide`        | 2    |
+| `karkain ide`                    | `Input file must be a .kark file: ide`        | 2    |
+| `karkain ide info <file>.kark`   | `Input file must be a .kark file: ide`        | 2    |
+| `karkain ide info --format=json` | `Error: Unknown flag '--format=json'` + usage | 2    |
+
+The error text is the decisive evidence: v1.0.0 parses `ide` as the **input
+filename**, not as a subcommand. Passing a real `.kark` path still fails the
+same way, and `ide` appears nowhere in `karkain --help` (109 lines; the only
+`info` verb is `pkg info <pkg>`).
+
+So the drift row above is misleading as written: v1.0.0 does not implement a
+variant `ide info` contract — the command does not exist. There is therefore
+**no local vector to derive a `schemaVersion: 1` contract from**, which is why
+Phase 13 cannot be implemented from this machine and the hardcoded argv vectors
+remain the only source of truth. Re-verify against a ≥ 1.1.0 build before
+attempting it.
+
+The same probe also confirms two extension behaviours against a real toolchain:
+`parseVersionString` reads the v1.0.0 banner (including its distinct
+`LSP Engine & IDE Tooling` suffix) and `supportsStructuredDiagnostics('1.0.0')`
+is `false`, so structured diagnostics stay correctly gated off;
+`parseTargetOutput` degrades honestly on the v1.0.0 `karkain target` shape
+(`c23`/`native`/`wasm32-wasi`, no `Host:` line, no compute section) into an
+empty-host matrix with three targets and no invented compute entries.
+
+### 8.2 `ide info` EXISTS in v1.2.0 — §8.1 is outdated (verified live 2026-11-14)
+
+Re-verified against the v1.2.0 binary actually required by this milestone,
+`F:\Codes\Git\Karkain\karkain.exe`, which reports
+`Karkain Compiler v1.2.0 (windows/amd64, Stable Build)`. The 2026-10-03 probe
+tested the v1.0.0 binary at `C:\Users\Lenovo\go\bin\karkain.exe`; the two
+conclusions were both correct — for the binaries tested. Do not cite §8.1 to
+claim v1.2.0 lacks the contract.
+
+| Invocation         | Result                                | Exit |
+| ------------------ | ------------------------------------- | ---- |
+| `karkain ide info` | schemaVersion 1 JSON contract (below) | 0    |
+
+Verbatim contract (trimmed to the load-bearing keys):
+
+```json
+{
+  "schemaVersion": 1,
+  "language": { "name": "Karkain", "id": "karkain", "extensions": [".kark"], "defaultFilename": "main.kark" },
+  "projectDetection": { "manifest": "karkain.toml", "marker": "main.kark" },
+  "toolchain": {
+    "binary": "karkain",
+    "check": ["karkain", "check", "<file>"],
+    "checkJSON": ["karkain", "check", "--format=json", "<file>"],
+    "build": ["karkain", "build", "<file>"],
+    "run": ["karkain", "run", "<file>"],
+    "test": ["karkain", "test", "<path>"],
+    "format": ["karkain", "fmt", "<file>"],
+    "formatCheck": ["karkain", "fmt", "--check", "<file>"],
+    "lint": ["karkain", "lint", "<file>"],
+    "lsp": ["karkain", "lsp"]
+  },
+  "diagnostics": { "format": "json", "schema": "karkain-diagnostics-v1", "code": "E-K-*/W-K-*" },
+  "exitCodes": { "success": 0, "failure": 1, "usage": 2, "compile": 3, "test": 4, "package": 5, "env": 6 }
+}
+```
+
+**Qualification (still required):** v1.2.0's `--help` output DOES include the
+`ide info` verb; the v1.0.0 `--help` (109 lines) did not. Phase 13's
+"no local vector" blocker is dissolved for v1.2.0. What remains unknown is
+whether `schemaVersion: 1` is a stability-guaranteed contract (open question
+2), so the hardcoded argv vectors remain the fallback; consuming the
+contract is Phase 13, not this milestone.
+
+### 8.3 v1.2.0 vs v1.1.0 vs v1.0.0 — extension-facing behaviour (2026-11-14)
+
+Live probes against the required v1.2.0 binary:
+
+- `check` on a **clean** file with the default (kcc) engine from outside the
+  Karkain source tree: **exit 6**, `cannot locate src/compiler to build the
+self-hosted engine (set KARKAIN_KCC)` — unchanged from source-built 1.1.0.
+  On a machine where the source-built `kcc` engine cannot bootstrap (no gcc;
+  observed here as `0xC000014D` STATUS_FATAL_MEMORY_EXHAUSTION), clean `check`
+  exits 3 with **empty output** — a silent pass/fail the extension papers over
+  only by its two-engine probe (default, then `KARKAIN_ENGINE=go`).
+- `check` on an invalid file: **exit 3** with human diagnostics (Go-side
+  syntax preflight), exit 0/PASS via `KARKAIN_ENGINE=go` on clean files, and
+  **`--format=json` is ignored on the kcc path entirely** (parsed, then
+  dropped) — structured JSON diagnostics flow only via the Go engine
+  (`[{"file":...,"line":5,"column":9,...}]`, exit 3).
+- `karkain test` on this machine cannot link the test binary: **exit 4**,
+  "no cross-linker available for target 'x86_64-windows'…" (no gcc/clang/cl.exe
+  on PATH), matching the target matrix's own demands. Not an extension bug.
+- `fmt`, `fmt --check`, `target`, `config`, `explain <code>`, `ide info`,
+  `--version`, `--help` all exit 0 and work as documented.
+- `lsp`: initialize returns `serverInfo {name: "karkain-lsp", version: 1.2.0}`
+  with capabilities completion/hover/definition/documentSymbol/
+  semanticTokens/formatting; hover and definition over resolved bindings
+  return correct MarkupContent; **every `shutdown` returns the empty envelope
+  `{"jsonrpc":"2.0","id":N}`** (server defect, repaired client-side by
+  `out/lsp-proxy.js`); after `exit` + stdin EOF the server exits **0**; on a
+  broken pipe it exits **1** (`handleLSP` → `os.Exit(ExitFailure)`) — the
+  source of the historical "exit code 1" observation.
+- The extension's own probes for all of the above are exercised in
+  `scripts/toolchain-smoke.mjs` (designed to abort with setup instructions
+  on source-built trees from outside the compiler repo) and
+  `scripts/lsp-smoke.mjs` (raw vs `--through-proxy`).
 
 ## 9. Real accepted syntax (verified by executing 1.1.0 built from source)
 

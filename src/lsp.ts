@@ -145,3 +145,30 @@ const SYMBOL_KINDS: Record<number, string> = {
 export function lspSymbolKindName(kind: number): string {
   return SYMBOL_KINDS[kind] ?? `Unknown(${kind})`;
 }
+
+// ---- JSON-RPC response envelope validation (deterministic, no vscode dep) ----
+
+export interface JsonRpcViolation {
+  type:
+    | 'malformed-envelope'
+    | 'invalid-jsonrpc-version'
+    | 'mismatched-response-id'
+    | 'response-with-neither-result-nor-error'
+    | 'unexpected-both-result-and-error'
+    | 'invalid-error-structure';
+  message: string;
+  raw: string;
+}
+
+export interface ValidatedResponse {
+  ok: boolean;
+  violation: JsonRpcViolation | null;
+}
+
+/** A valid JSON-RPC 2.0 response envelope, decomposed for testing. */
+export interface JsonRpcResponse {
+  jsonrpc: string;
+  id: unknown;
+  result?: unknown;
+  error?: { code: number; message: string; data?: unknown };
+}

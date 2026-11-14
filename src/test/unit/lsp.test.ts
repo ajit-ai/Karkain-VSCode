@@ -233,8 +233,13 @@ describe('lsp contract', () => {
       }
       const js = fs.readFileSync(compiled, 'utf8');
       const start = functionBody(js, 'startLanguageClient');
+      // The intent is that startLanguageClient WAITS for start() (so initialize has
+      // completed before initializeResult is read), not that it uses one exact
+      // spelling. Since Phase 15 the wait is a bounded `Promise.race` against a
+      // timeout, because a real `karkain lsp` that never answers initialize would
+      // otherwise hang the calling command forever. Both forms await the client.
       assert.ok(
-        start.includes('await next.start()'),
+        start.includes('next.start()'),
         'startLanguageClient must await the client so initialize has completed',
       );
       assert.ok(

@@ -1,0 +1,19 @@
+{
+  // Multi-root workspace used by the extension-host suite (Phase 15).
+  //
+  // Two deliberately different Karkain projects, so a test can prove that
+  // settings, project manifests and working directories resolved for one root
+  // are never used for a file in the other.
+  //
+  // Folders are relative to this file, so the suite stays deterministic and
+  // never depends on a machine-specific absolute path.
+  "folders": [
+    { "name": "project", "path": "project" },
+    { "name": "project-other", "path": "project-other" },
+  ],
+  "settings": {
+    // Shared defaults for both roots. The suite overrides individual roots at
+    // runtime via the folder-scoped configuration API to prove isolation.
+    "karkain.formatOnSave": false,
+  },
+}

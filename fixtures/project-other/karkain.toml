@@ -1,0 +1,10 @@
+// Second project root for the multi-root extension-host suite.
+//
+// Deliberately a DIFFERENT project from fixtures/project: a different name,
+// version and targets, so a test can prove one root's settings and manifest are
+// not read while acting on the other root's files.
+name = "other-sample"
+version = "2.5.0"
+description = "A second Karkain project, used by the multi-root suite"
+license = "Apache-2.0"
+targets = ["native", "wasm32-wasi"]

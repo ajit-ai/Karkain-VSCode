@@ -16,8 +16,14 @@ out/test/**
 #   docs/      internal process/inspection docs (linked from the GitHub repo)
 #   fixtures/  real .kark programs used only by the manual smoke gates
 #   scripts/   manual lsp-smoke / toolchain-smoke gates (need a real toolchain)
+# docs/user/** is the bundled, verified user documentation opened by the
+# Documentation view and MUST ship.
 docs/**
+!docs/user/**
 fixtures/**
 scripts/**
+# Local audit scratch from the LSP-reliability recovery; never shipped:
+.audit/**
+.audit*.txt
 # templates/ is intentionally shipped: the README tells users to copy
 # templates/launch.json and templates/tasks.json into their own workspace.
