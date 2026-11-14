@@ -2,13 +2,15 @@
 
 ## Versioning
 
-Semantic Versioning. The manifest currently declares **1.0.0**, an unpublished
-release candidate: the Windows gates are green locally, but macOS/Linux legs
-have not run and no real-world validation beyond this repository exists. 1.0
-is only _declared released_ when every gate holds: core language support,
-diagnostics, build, run, IntelliSense, tests, green CI on all three OSes,
-VSIX packaging, complete docs and understood cross-platform behavior — plus an
-explicit owner decision. Do not tag, release or publish this build.
+Semantic Versioning. **Karkain Language Tools 1.0.0 is released** (GitHub
+Releases from the `v1.0.0` tag). Verified release gates: merge commit
+`ceea1b80260babd43511a6f6dbc85f3e27debd0b` (PR #1) is green on CI run #13
+(`43587837685`, all six legs on Windows/Ubuntu/macOS); unit 224/224;
+extension-host suite green on all three OSes; VSIX packaging verified from
+the exact tagged commit; GitHub Release carries the freshly built
+`karkain-1.0.0.vsix`. Real-world user validation, and the upstream Karkain
+LSP empty-envelope fix, remain open items for a later change — see
+"Known limitations" in the README and in `CHANGELOG.md`.
 
 The activation banner reads the version from the manifest at runtime, so no
 source edit is needed for a bump.
@@ -22,8 +24,9 @@ source edit is needed for a bump.
    `test:integration`, `package`, install the `.vsix` and smoke-test (open
    `.kark`, check, build, run, test).
 3. Commit to `develop`, merge to `main`, push both.
-4. Tag and push the tag: `git tag v1.0.0 && git push origin v1.0.0`. The tag
-   must match `package.json` or the release workflow fails fast.
+4. Create the tag on the merged commit and push it: `git tag v1.0.0 && git
+push origin v1.0.0`. The tag must match `package.json` or the release
+   workflow fails fast.
 5. `release.yml` validates, packages and creates the GitHub Release with the
    `.vsix` asset and the CHANGELOG section as notes. Verify the Release page
    and install the attached `.vsix` on a clean profile before announcing.

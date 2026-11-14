@@ -1,8 +1,9 @@
-# Release Notes — Karkain Language Tools 1.0.0 (candidate)
+# Release Notes — Karkain Language Tools 1.0.0
 
-**Not published.** v1.0.0 is an unpublished release candidate: Windows gates
-are verified locally; macOS/Linux legs and real-world validation are pending.
-See the repository `CHANGELOG.md` and `docs/RELEASE.md`.
+**1.0.0 released (2026-11-14).** Verified: PR #1 merged; CI run #13 green on
+Windows/Ubuntu/macOS (all six legs); unit 224/224; extension-host suite green
+on all three OSes; VSIX built from the tagged commit. Honest limitations
+below and in the repository `CHANGELOG.md` and `docs/RELEASE.md`.
 
 ## Highlights
 

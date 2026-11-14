@@ -1,9 +1,11 @@
 # Marketplace Readiness & Owner Runbook
 
 > **Note (2026-11-14):** this runbook records the v0.9.0 release checklist.
-> The current candidate is **1.0.0** (unpublished). Version-specific steps
-> below (tag, version fields) must be re-read against `package.json` and
-> `docs/RELEASE.md` before any owner action.
+> **Karkain Language Tools v1.0.0 is now released on GitHub** (tag `v1.0.0`).
+> Version-specific steps below (tag, version fields) must be re-read against
+> `package.json`, `docs/RELEASE.md` and the actual v1.0.0 release before any
+> Marketplace owner action. Marketplace publication was deliberately excluded
+> from v1.0.0.
 
 Status (verified 2026-09-24 against v0.9.0): **ready pending owner actions**.
 No code changes are required to publish; the remaining steps all need the

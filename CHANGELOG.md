@@ -1,25 +1,37 @@
 # Changelog
 
-All notable changes follow Semantic Versioning. The extension stayed pre-1.0
+All notable changes follow Semantic Versioning. The extension was pre-1.0
 until core language support, diagnostics, build, run, IntelliSense, tests, green
-CI, VSIX packaging, complete docs and understood cross-platform behavior — the
-1.0.0 entry below is an **unpublished release candidate**, so the 1.0 bar is
-carried forward until macOS/Linux legs and real-world validation exist.
+CI, VSIX packaging, complete docs and x-platform CI were in place —
+the 1.0.0 entry reflects those gates as verified below (Windows, Ubuntu and
+macOS); the remaining honest limitation is real-world validation outside this
+repository and CI, and Marketplace publication (not performed).
 
-## [1.0.0] — 2026-11-14 (release candidate — not published)
+## [1.0.0] — 2026-11-14
 
-Metadata for the intended v1.0.0 release. **Not released and not release-ready:**
-the integration job has not run in CI yet (Phase 14), the toolchain smoke gate
-is blocked on a machine without a working kcc/gcc (see `docs/ROADMAP.md`), and
-the project's own release bar (cross-platform behaviour understood + real-world
-validation) is not met. No tag, no GitHub release, no Marketplace publish —
-those are owner actions. The content below is what v1.0.0 would ship.
+**Karkain Language Tools v1.0.0 released.** Evidence:
+
+- PR #1 (`develop` → `main`) merged as merge commit
+  `ceea1b80260babd43511a6f6dbc85f3e27debd0b`.
+- CI run #13 (`43587837685`, push to `main`): **all six validation and
+  integration jobs passed on Windows, Ubuntu and macOS** (each leg green:
+  typecheck, lint, format:check, unit tests, `vsce package`, and the
+  extension-host suite via xvfb on Linux).
+- Unit tests: **224 passed**. Extension-host tests: **22 passed locally on
+  Windows** plus the three CI integration legs; `.vscode-test` pinned-build
+  path also passes on Windows.
+- The LSP reliability work ships behind the protocol-repair shim (raw server
+  defect remains upstream; the extension repairs the empty-envelope at its
+  protocol boundary). Karkain repository behavior and CLI contract verified
+  live against Karkain v1.2.0 (Windows AMD64).
+- No Marketplace publication; no real-world validation beyond this
+  repository and CI — see "Known limitations" below.
 
 Karkain Language Tools 1.0.0 collects the Phase 1 foundation, Phases 12, 14
 and 15, and the v1.0.0 recovery milestone (LSP reliability + Karkain 1.2.0
-compatibility) plus the complete IDE experience milestone into one release
-candidate. Everything below marked "verified" was executed live against the
-real `karkain` v1.2.0 binary on Windows AMD64.
+compatibility) plus the complete IDE experience milestone into one release.
+Everything below marked "verified" was executed live against the
+real `karkain` v1.2.0 binary on Windows AMD64 and/or on CI.
 
 ### v1.0.0 — complete IDE experience
 
@@ -120,15 +132,14 @@ has neither a result nor an error property.` is a Karkain server defect,
   paths are surfaced (probe outcome notFound/unrecognized/failed) rather than
   guessed.
 
-### Testing (v1.0.0 gates, this tree, updated 2026-11-14)
+### Testing (v1.0.0 gates, release)
 
 - Unit suite: **224/224 passing** (was 166 at recovery baseline). New cases:
   ide-info parsing/validation/comparison, command catalogue integrity + search,
   recent actions, health report builder, flag splitting.
-- Extension-host suite: **22/22 passing** against a local VS Code on Windows
-  (`npm run test:integration`), including the new Control Center command and
-  view contributions (all ~43 contributed commands asserted registered; all
-  survive a missing toolchain without throwing).
+- Extension-host suite: **22/22 passing** against a local VS Code on Windows;
+  the same suite runs green on **Ubuntu (Linux, xvfb) and macOS in CI**
+  (run #13, all six legs).
 - `test:lsp-smoke` (raw): 20/22 — exactly the two known server-defect
   assertions fail, with raw frames as evidence.
 - `test:lsp-smoke:proxy` (release gate): **22/22 PASS** with the real v1.2.0
@@ -136,7 +147,10 @@ has neither a result nor an error property.` is a Karkain server defect,
 - `test:toolchain-smoke` could not run here (no gcc; the self-hosted kcc
   engine crashes with `0xC000014D` on this machine, and it must never be run
   with CWD inside the compiler repository because it can trigger a rebuild of
-  `kcc.exe` there). CI legs for the other two OSes are unverified.
+  `kcc.exe` there). **Cross-platform compiler execution is machine-dependent —
+  CI verifies packaging and the extension host on all three OSes; the actual
+  compiler/EGL paths on macOS/Linux are expected to follow the same engine
+  behaviors documented for Windows.**
 
 ### Phase 1 foundation (testability), Phase 12, Phase 14, Phase 15
 
