@@ -60,7 +60,13 @@ await runTests({
   vscodeExecutablePath,
   extensionDevelopmentPath: repoRoot,
   extensionTestsPath: path.resolve(repoRoot, 'out', 'test', 'suite', 'index.js'),
-  // fixtures/project is a real karkain.toml project, so activation sees the
-  // same shape it will see in a user's workspace.
-  launchArgs: [path.resolve(repoRoot, 'fixtures', 'project'), '--disable-extensions'],
+  // A .code-workspace with two REAL Karkain project roots
+  // (fixtures/project and fixtures/project-other). Opening a workspace file
+  // rather than a folder is what makes the multi-root suite meaningful: the
+  // activation path sees a genuine multi-root window, with two roots that have
+  // deliberately different karkain.toml manifests. Single-folder behaviour is
+  // still covered — the unit suite and the single-root cases in
+  // activation.test.ts run against the same extension, and the multi-root suite
+  // asserts the single-root invariants still hold inside a two-root window.
+  launchArgs: [path.resolve(repoRoot, 'fixtures', 'multiroot.code-workspace'), '--disable-extensions'],
 });

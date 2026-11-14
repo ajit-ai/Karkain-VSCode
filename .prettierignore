@@ -1,0 +1,3 @@
+# Local audit scratch from the LSP-reliability recovery; not release material.
+.audit/
+.audit*.txt

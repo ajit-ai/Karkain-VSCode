@@ -1,8 +1,25 @@
 # Roadmap (internal, numbered)
 
-Status: Phases 1–9 complete, plus a Phase 1 integration-hardening pass and the
-start of a second Phase 1 track on testability. No phase is skipped; each lands
-with tests, validation runs, docs updates and an honest limitation report.
+Status: Phases 1–12, 14 and 15 complete. **Phase 13 (`karkain ide info`
+consumption) is unblocked — v1.2.0 ships a machine-readable contract**
+(§8.2) — but remains unimplemented in this milestone by design; it is a
+separate phase. No phase is skipped; each lands with tests, validation
+runs, docs updates and an honest limitation report.
+
+Verification snapshot (2026-11-14, on top of `aec1a74`, Karkain v1.2.0
+windows/amd64 at `F:\Codes\Git\Karkain\karkain.exe`):
+`npm run typecheck` clean, `npm run lint` clean, `npm run format:check`
+clean, `npm run test:unit` **188/188 passing**, `npm run test:integration`
+**20/20 passing** (local VS Code, no other instance open). Real-binary gates:
+`test:lsp-smoke` (raw) 20/22 with the two known server-defect assertions
+failing as designed; `test:lsp-smoke:proxy` **22/22 PASS** — initialize,
+diagnostics push, hover (resolved and unresolvable), completion, definition,
+documentSymbol, semanticTokens, shutdown all valid, and the server exits 0
+on stdin EOF. `test:toolchain-smoke` **could not run** on this machine (no
+gcc; the source-built `kcc` engine crashes with `0xC000014D`); it must not
+be run with CWD inside the compiler repository. CI legs on macOS/Linux are
+unverified — the Phase 14 `integration` job is on the v1.0.0 recovery branch
+but has never run; that is the release-blocker for Phase 17.
 
 - [x] **Phase 10 — Toolchain service seam** (`src/toolchainService.ts`): one
       `ToolchainService` interface owns every Karkain process; `child_process`
@@ -14,19 +31,130 @@ with tests, validation runs, docs updates and an honest limitation report.
       language id, missing-toolchain survival, and CLI reachability through the
       injected seam. Unit suite 89 → 104 cases. Prefers a local VS Code install
       over a ~340 MB download.
-      Still open in this track: CI does not run the integration suite, the two
-      manual smoke gates still need a real toolchain, and the check/test/debug
-      orchestration paths are covered only where the fake can observe them.
-- [ ] **Phase 12 — Capability negotiation and project model**: activate the
-      already-written-but-dead negotiation in `src/lsp.ts` (capability gate,
-      `serverInfo` version), auto-restart the language client when
-      `karkain.compilerPath` changes, and parse `karkain.toml` into a real
-      project model (`manifestPath` in `src/project.ts` is still unused).
+      Still open in this track: the two manual smoke gates still need a real
+      ≥ 1.1.0 toolchain, and the check/test/debug orchestration paths are covered
+      only where the fake can observe them. The "CI does not run the integration
+      suite" gap closed in Phase 14.
+- [x] **Phase 12 — Capability negotiation and project model**: the negotiation in
+      `src/lsp.ts` is now live in the client — `reportServerCapabilities` in
+      `src/extension.ts` validates the real `initializeResult` once `start()`
+      resolves. Compatibility is decided **only** from the server's own
+      `serverInfo.version`, never from the CLI `--version` probe (the two can
+      diverge); an unparseable version is reported as unverifiable rather than
+      assumed good, and missing capabilities warn without ever stopping a
+      working server. A changed `karkain.compilerPath` now stops and restarts the
+      client via `restartLanguageClientAndStart`, serialized behind a single
+      in-flight promise so overlapping restarts cannot interleave for the one
+      client slot; the change is logged and confirmed in the status bar rather
+      than happening silently.
+      `src/project.ts` gained a real project model, so `manifestPath` is no
+      longer dead code: `parseManifest` (a deliberately small TOML subset — flat
+      top-level assignments, matching the verified 1.1.0 `pkg init` output, not
+      the SPEC §10.1 `[package]` table), plus `readManifest`, `loadProject` and
+      `describeProject`. Anything the parser does not model — section tables,
+      unmodelled keys, wrongly-typed or unterminated values — is reported rather
+      than guessed, and `Karkain: Show Environment` surfaces all of it. Unit
+      suite 132 → 150, including a case that parses the committed
+      `fixtures/project/karkain.toml`.
 - [ ] **Phase 13 — `karkain ide info` consumption**: replace hardcoded argv
       with the toolchain's own machine-readable contract
       (`schemaVersion: 1`: argv shapes, diagnostics schema, exit codes), keeping
       the hardcoded vectors as a fallback because no stability guarantee is
       stated.
+      **UNBLOCKED — verified live 2026-11-14 against v1.2.0**
+      (`F:\Codes\Git\Karkain\karkain.exe`, Windows AMD64): `karkain ide info`
+      prints a `schemaVersion: 1` JSON contract (language, project detection,
+      argv vectors, diagnostics schema `karkain-diagnostics-v1` with codes
+      `E-K-*/W-K-*`, exit codes 0/1/2/3/4/5/6), exit 0. The earlier claim
+      that `ide info` does not exist was true of v1.0.0 (see
+      `docs/KARKAIN-INSPECTION.md` §8.1, now corrected by §8.2) and is
+      outdated for v1.2.0. **Not implemented in this milestone by design.**
+      Unblock consumed: re-probing argv shapes is no longer required for the
+      contract itself, but the stability guarantee question (open question 2)
+      is still unanswered — the hardcoded vectors stay as fallback.
+
+## Proposed phases 14+ (not yet committed to a release)
+
+Ordered by dependency. Phases 12 and 13 must land first: 14 and 15 consume
+their outputs, and 13 changes the argv model that 14 asserts against.
+
+- [x] **Phase 14 — CI integration job**: `.github/workflows/ci.yml` now runs
+      `npm run test:integration` on the same 3-OS matrix as `validate`, as a
+      separate job so the fast unit suite is never blocked by an Electron start.
+      Linux wraps the runner in `xvfb-run` (Electron needs a display); Windows
+      and macOS need no wrapper, so one conditional `run:` serves all three.
+      `KARKAIN_VSCODE_DOWNLOAD=1` forces the pinned build in CI rather than
+      whatever happens to be installed on the runner. Failure logs are uploaded
+      as artifacts. This closes the Phase 11 "CI does not run the integration
+      suite" note. Still to confirm on the first CI run: whether the pinned
+      VS Code build starts cleanly on all three OSes.
+- [x] **Phase 15 — Multi-root workspace support**: project-root and configuration
+      resolution are now per-folder and per-document. `src/workspace.ts` holds
+      the ownership rule as pure, unit-tested code (`isPathInsideRoot`,
+      `findOwningRoot`, `findOwningRootPath`): the longest containing root wins
+      so a nested root beats its parent, matching is segment-boundary aware so
+      `/proj/app` never claims `/proj/application`, case folds only on
+      case-insensitive filesystems, and a file outside every root resolves to
+      nothing rather than to an arbitrary root. Every config getter in
+      `src/config.ts` now takes a scope, because an unscoped
+      `getConfiguration` returns the _first_ folder's value for every file —
+      which would silently give root B root A's toolchain. All four settings
+      are declared `"scope": "resource"` so they can be set per folder.
+      `effectiveCwd`, the tasks, the toolchain picker and Show Environment all
+      resolve from the file that is actually being acted on.
+      The extension-host suite now runs against `fixtures/multiroot.code-workspace`,
+      a genuine two-root window over two deliberately different Karkain
+      projects (`fixtures/project`, `fixtures/project-other`), with
+      `src/test/suite/multiroot.test.ts` asserting folder ownership and that
+      folder-scoped settings do not leak between roots. The existing
+      single-root assertions in `activation.test.ts` were kept and now run
+      _inside_ that two-root window, so "one client, one set of registrations,
+      root-count-independent commands" is enforced rather than assumed.
+      Unit suite 150 → 166.
+      Known limitation, deliberate: the language server stays a single window-
+      wide client spawned from the workspace-wide `karkain.compilerPath`, so a
+      per-folder compiler path governs CLI commands, tasks and formatting but
+      not the server's own executable. Per-root clients would duplicate the
+      server, output channel and diagnostics stream for no added capability;
+      running two toolchains concurrently is a different design.
+- [ ] **Phase 16 — Coverage of the remaining orchestration paths**: the Phase 11
+      note records that `check`/`test`/`debug` orchestration is only covered
+      where the fake can observe it. Extend `src/test/fakes/toolchainFake.ts` so
+      those paths are assertable end to end rather than only argv-visible.
+- [ ] **Phase 17 — Release 1.0 readiness**: the manifest is now `1.0.0`
+      (recovery milestone metadata) but the CHANGELOG states this is an
+      unpublished release candidate. As of 2026-11-14 the Windows leg of the
+      gates is green locally (typecheck/lint/format:check/unit 188/188,
+      integration 20/20, proxy smoke 22/22, VSIX packaged); **macOS and Linux
+      are unverified, and the Phase 14 `integration` job has never run**, so
+      the A-30 bar ("understood cross-platform behavior", green CI) is not
+      met. Still also blocked on the Marketplace publisher decision in
+      `docs/RELEASE.md`. Do not tag, release or publish without all legs
+      green and an explicit owner decision.
+- [x] **Phase 18 — LSP reliability (v1.0.0 recovery milestone)**: root cause of
+      `Request textDocument/hover failed ... neither a result nor an error
+property` conclusively established as a Karkain server defect (empty
+      envelope on no-result handlers, incl. every `shutdown`); fixed at the
+      extension boundary by `out/lsp-proxy.js` (rewrites ONLY the empty
+      envelope to `result: null`), verified end-to-end against the real
+      v1.2.0 binary (hover/definition/shutdown repaired, server exits 0).
+      `deactivate()` can no longer throw; startup is bounded; restarts are
+      serialized; the smoke gate was rewritten with strict framing and two
+      modes (raw evidence vs `--through-proxy` release gate, 22/22 PASS).
+      Focused unit tests for the repair logic landed (166 → 188).
+- [ ] **Deferred, needs upstream Karkain**: rename, references, code actions and
+      workspace symbols are absent from `karkain lsp` (documented in
+      `docs/KARKAIN-INSPECTION.md` §4). These are toolchain gaps, not extension
+      gaps, and must not be faked. Revisit when the server ships them.
+
+## Open questions blocking the phases above
+
+1. Does the extension own `karkain.compilerPath` restarts, or is an explicit
+   `Karkain: Restart Language Server` click the intended UX? Phase 12(a) needs a
+   decision — silent restart is convenient but surprising during a build.
+2. Is `karkain ide info` given a stability guarantee upstream? Phase 13's
+   fallback path stays until it is.
+3. Who owns the Marketplace `karkain` publisher? Blocks Phase 17 only.
 
 - [x] **Phase 1 — Repository Foundation & Architecture**: Karkain inspection
       (docs/KARKAIN-INSPECTION.md), boundary (docs/INTEGRATION-BOUNDARY.md),

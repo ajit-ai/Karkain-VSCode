@@ -1,5 +1,10 @@
 # Marketplace Readiness & Owner Runbook
 
+> **Note (2026-11-14):** this runbook records the v0.9.0 release checklist.
+> The current candidate is **1.0.0** (unpublished). Version-specific steps
+> below (tag, version fields) must be re-read against `package.json` and
+> `docs/RELEASE.md` before any owner action.
+
 Status (verified 2026-09-24 against v0.9.0): **ready pending owner actions**.
 No code changes are required to publish; the remaining steps all need the
 owner's Microsoft/publisher identity and cannot be done by automation.

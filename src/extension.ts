@@ -9,6 +9,7 @@
 // toolchain.
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import * as path from 'path';
 import {
   buildArgs,
   candidateExecutableNames,
@@ -40,7 +41,7 @@ import {
   MIN_LANGUAGE_SERVER_VERSION,
   negotiateServerCapabilities,
 } from './lsp';
-import { findProjectRoot } from './project';
+import { describeProject, findProjectRoot, loadProject } from './project';
 import { KarkainTaskKind, isFileScoped, taskArgs, taskGroup, taskLabel } from './tasks';
 import {
   parseTestResults,
@@ -205,6 +206,11 @@ export function reportServerCapabilities(result: unknown): void {
   );
 }
 
+// How long to wait for `karkain lsp` to answer `initialize` before giving up on
+// the start. Generous enough for a cold real toolchain, short enough that a
+// silent server cannot wedge a command indefinitely.
+export const LSP_START_TIMEOUT_MS = 20000;
+
 async function startLanguageClient(context: vscode.ExtensionContext): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   let lc: any;
@@ -217,7 +223,53 @@ async function startLanguageClient(context: vscode.ExtensionContext): Promise<vo
     );
     return;
   }
-  const serverOptions = { command: getCompilerPath(), args: ['lsp'], options: {} };
+  // Deliberately unscoped, and deliberately ONE client for the whole window.
+  //
+  // `karkain lsp` is a single stdio server, and the client below selects every
+  // `file:`/`karkain` document regardless of which root it lives in, so one
+  // client already serves a multi-root workspace. Spawning one client per root
+  // would duplicate the server, the output channel and the diagnostics stream
+  // for no added capability.
+  //
+  // The consequence is honest and worth stating: the language server runs the
+  // workspace-wide `karkain.compilerPath`, so a per-folder compilerPath applies
+  // to CLI commands, tasks and formatting decisions, but NOT to the language
+  // server's own executable. Running a different toolchain per root would need
+  // a per-root client; that is out of scope here and is recorded as a known
+  // limitation rather than silently half-implemented.
+  //
+  // The server is spawned behind out/lsp-proxy.js, a stdio shim that repairs
+  // one exact server-side protocol defect: `karkain lsp` answers responses
+  // with no result and no error (e.g. every `shutdown`, and every hover that
+  // resolves no binding — timing-dependent). vscode-jsonrpc rejects those
+  // with "The received response has neither a result nor an error property.",
+  // which also broke stop() before the `exit` notification, leaving the
+  // server's pipe to break abnormally (observed as exit code 1). The proxy
+  // rewrites ONLY that envelope to `"result": null`, which is what JSON-RPC
+  // 2.0 and the LSP mandate. It needs no Karkain changes; when Karkain fixes
+  // the server, the proxy degrades to a zero-effect pipe.
+  const proxyPath = path.join(__dirname, 'lsp-proxy.js');
+  const direct = resolvedCompilerPath();
+  const serverOptions = fs.existsSync(proxyPath)
+    ? {
+        command: process.execPath,
+        args: [proxyPath, direct, 'lsp'],
+        options: { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } },
+      }
+    : {
+        command: getCompilerPath(),
+        args: ['lsp'],
+        options: {},
+      };
+  if (!fs.existsSync(proxyPath)) {
+    // Degraded, not silent: without the proxy the extension keeps working but
+    // the Karkain server's empty-envelope defect reaches the client as-is.
+    log(
+      'out/lsp-proxy.js is missing; spawning `karkain lsp` directly. Malformed server responses will surface unrepaired.',
+    );
+  } else {
+    log(`language server spawns behind the protocol repair shim (${path.basename(proxyPath)})`);
+  }
   const clientOptions = {
     documentSelector: [{ scheme: 'file', language: 'karkain' }],
     outputChannel: lspChannel,
@@ -228,6 +280,29 @@ async function startLanguageClient(context: vscode.ExtensionContext): Promise<vo
         'Karkain: the language server failed to start. See the Karkain Language Server output channel.',
       );
       return false;
+    },
+    // Surfaces protocol and transport errors (including malformed server
+    // responses with neither result nor error) in the dedicated output
+    // channel instead of silently swallowing them. `Continue` keeps the server
+    // running for transient failures; `DoNotRestart` on close avoids zombie
+    // restart loops when the server exits with a genuine error.
+    errorHandler: {
+      error: (
+        error: Error,
+        message: { method?: string; id?: unknown } | undefined,
+        count: number | undefined,
+      ) => {
+        log(`Karkain Language Server protocol error (count=${count ?? 0}): ${error.message}`);
+        if (message) {
+          log(`  request: method=${JSON.stringify(message.method)}, id=${message.id}`);
+        }
+        void lspChannel?.show();
+        return { action: lc.ErrorAction.Continue, handled: true };
+      },
+      closed: () => {
+        log('Karkain Language Server connection closed.');
+        return { action: lc.CloseAction.DoNotRestart, handled: true };
+      },
     },
   };
   const next = new lc.LanguageClient(
@@ -242,13 +317,32 @@ async function startLanguageClient(context: vscode.ExtensionContext): Promise<vo
   try {
     // v9 start() resolves once initialize has completed, which is the only
     // point at which initializeResult is meaningful.
-    await next.start();
+    //
+    // Bounded: `next.start()` has no timeout of its own, so a language server
+    // that starts but never answers `initialize` would otherwise hang the
+    // calling command forever — observed with a real `karkain lsp` that accepts
+    // the stdio connection and then goes silent. The race leaves start()
+    // running (it may still complete and become usable) but returns control, so
+    // the user is not stuck; a failure is surfaced and the half-built handle is
+    // dropped rather than left for deactivate() to stop.
+    await Promise.race([
+      next.start(),
+      new Promise<void>((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`language server did not initialize within ${LSP_START_TIMEOUT_MS}ms`)),
+          LSP_START_TIMEOUT_MS,
+        ).unref?.(),
+      ),
+    ]);
   } catch (e) {
     // Never leave a stale handle behind for deactivate() to try to stop.
     if (client === next) {
       client = null;
     }
     log(`Karkain language client failed to start: ${(e as Error).message}`);
+    void vscode.window.showWarningMessage(
+      'Karkain: the language server did not start. check/build/run still work; see the Karkain Language Server output channel.',
+    );
     return;
   }
   // start() resolves to a promise, not a disposable, so register a real
@@ -271,6 +365,30 @@ async function restartLanguageClient(): Promise<void> {
     }
     client = null;
   }
+}
+
+// Guards against overlapping restarts. Two concurrent stop/start cycles would
+// race for the single `client` slot and can leave a half-built client behind, so
+// a second request waits for the first to finish instead of interleaving.
+let restartInFlight: Promise<void> | null = null;
+
+/**
+ * Stops and restarts the language client as one serialized operation.
+ * Safe to call concurrently: overlapping callers share the in-flight run.
+ */
+function restartLanguageClientAndStart(context: vscode.ExtensionContext): Promise<void> {
+  if (restartInFlight) {
+    return restartInFlight;
+  }
+  const run = (async () => {
+    // Awaited so a stop can never race the next start.
+    await restartLanguageClient();
+    await startLanguageClient(context);
+  })().finally(() => {
+    restartInFlight = null;
+  });
+  restartInFlight = run;
+  return run;
 }
 
 // The toolchain -> VS Code severity decision itself lives in diagnostics.ts as
@@ -302,20 +420,48 @@ function activeKarkainDocument(): vscode.TextDocument | null {
   return doc;
 }
 
-function runInTerminal(label: string, args: string[], cwd?: string): void {
+// `scope` is the workspace folder that owns the file the command acts on, so a
+// multi-root window runs each root's own configured toolchain.
+function runInTerminal(label: string, args: string[], cwd?: string, scope?: vscode.WorkspaceFolder): void {
   const term = vscode.window.createTerminal({ name: label, cwd });
   term.show(true);
-  term.sendText(`${getCompilerPath()} ${args.map(quoteTerminalArg).join(' ')}`);
+  term.sendText(`${getCompilerPath(scope)} ${args.map(quoteTerminalArg).join(' ')}`);
 }
 
 // Working directory for file commands: the karkain.toml project root when the
-// file lives in a project, else the workspace folder, else undefined.
+// file lives in a project, else the workspace folder that owns the file, else
+// undefined.
+//
+// Multi-root: the owning folder is resolved from the file itself, never from
+// `workspaceFolders[0]`. A file outside every root yields undefined, which the
+// toolchain treats as "inherit the process cwd" — an honest result rather than
+// a fabricated association with an unrelated root.
 function effectiveCwd(file: string): string | undefined {
   const root = findProjectRoot(file);
   if (root) {
     return root;
   }
   return vscode.workspace.getWorkspaceFolder(vscode.Uri.file(file))?.uri.fsPath;
+}
+
+/**
+ * The configuration scope for a file: the workspace folder that owns it, or
+ * undefined when it is outside every root.
+ *
+ * Passing this to `getCompilerPath`/`getTarget`/… is what makes folder-scoped
+ * settings resolve per root. Undefined is the correct answer for a document with
+ * no workspace context, not a gap to paper over with the first folder.
+ */
+function configScopeFor(file: string): vscode.WorkspaceFolder | undefined {
+  if (!file) {
+    return undefined;
+  }
+  return vscode.workspace.getWorkspaceFolder(vscode.Uri.file(file));
+}
+
+/** Same, from an open document (its URI is the resource VS Code scopes on). */
+function configScopeForDoc(doc: vscode.TextDocument | undefined): vscode.WorkspaceFolder | undefined {
+  return doc ? configScopeFor(doc.uri.fsPath) : undefined;
 }
 
 function pathDirectories(): string[] {
@@ -327,9 +473,11 @@ function toolchainNames(): string[] {
 }
 
 // Every karkain executable found via PATH (de-duplicated), configured path first.
-function discoverToolchains(): string[] {
+// `scope` resolves folder-scoped settings: without it a multi-root window would
+// offer root A's configured toolchain while acting on root B's file.
+function discoverToolchains(scope?: vscode.WorkspaceFolder): string[] {
   const found = listOnPath(pathDirectories(), toolchainNames(), (p) => fs.existsSync(p));
-  const configured = getCompilerPath();
+  const configured = getCompilerPath(scope);
   const configuredIsPath = configured.includes('/') || configured.includes('\\');
   if (configuredIsPath && fs.existsSync(configured) && !found.includes(configured)) {
     return [configured, ...found];
@@ -337,18 +485,24 @@ function discoverToolchains(): string[] {
   return found;
 }
 
+// The status bar is a single global item, so it reports the target for the
+// active document's folder. With no active document it falls back to the
+// workspace-wide value rather than an arbitrary root's.
 function updateTargetStatus(): void {
-  const t = getTarget();
+  const scope = configScopeForDoc(vscode.window.activeTextEditor?.document);
+  const t = getTarget(scope);
   if (targetStatus) {
     targetStatus.text = `Karkain: ${t === '' ? 'native' : t}`;
-    targetStatus.tooltip = 'Karkain target (click to select)';
+    targetStatus.tooltip = scope
+      ? `Karkain target for ${scope.name} (click to select)`
+      : 'Karkain target (click to select)';
     targetStatus.command = 'karkain.selectTarget';
     targetStatus.show();
   }
 }
 
-function resolvedCompilerPath(): string {
-  const configured = getCompilerPath();
+function resolvedCompilerPath(scope?: vscode.WorkspaceFolder): string {
+  const configured = getCompilerPath(scope);
   if (configured.includes('/') || configured.includes('\\')) {
     return configured;
   }
@@ -361,17 +515,20 @@ function resolveTaskDefinition(
   cwdOverride?: string,
 ): vscode.Task | undefined {
   const kind = definition.task;
+  // Scope settings to the folder that owns this task's file, so a task for a
+  // file in root B builds with root B's target and compiler.
+  const scope = definition.file ? configScopeFor(definition.file) : folder;
   let args: string[];
   try {
     // The configured target is applied here, exactly as the Build File/Run File
     // commands apply it, so the task and the command cannot disagree.
-    args = taskArgs({ kind, file: definition.file, target: getTarget() });
+    args = taskArgs({ kind, file: definition.file, target: getTarget(scope) });
   } catch {
     return undefined;
   }
   const cwd =
     cwdOverride ?? (definition.file ? effectiveCwd(definition.file) : undefined) ?? folder?.uri.fsPath;
-  const execution = new vscode.ShellExecution(getCompilerPath(), args, { cwd });
+  const execution = new vscode.ShellExecution(getCompilerPath(scope), args, { cwd });
   const task = new vscode.Task(
     definition,
     folder ?? vscode.TaskScope.Workspace,
@@ -796,8 +953,10 @@ async function runDebug(): Promise<void> {
   const folder = vscode.workspace.getWorkspaceFolder(doc.uri);
   const cwd = effectiveCwd(file);
   debugChannel?.show(true);
-  if (getTarget() !== '') {
-    debugChannel?.appendLine(`note: karkain.target is '${getTarget()}'; debugging always uses a host build`);
+  if (getTarget(folder) !== '') {
+    debugChannel?.appendLine(
+      `note: karkain.target is '${getTarget(folder)}'; debugging always uses a host build`,
+    );
   }
   debugChannel?.appendLine(`$ karkain build -g ${file} -o ${program}`);
   const build = await currentToolchain()
@@ -816,7 +975,7 @@ async function runDebug(): Promise<void> {
     );
     return;
   }
-  const config = cppdbgLaunchConfig(program, getDebuggerPath());
+  const config = cppdbgLaunchConfig(program, getDebuggerPath(folder));
   debugChannel?.appendLine(`launching ${program} under GDB`);
   const started = await vscode.debug.startDebugging(folder, config);
   if (!started) {
@@ -887,27 +1046,36 @@ export function activate(context: vscode.ExtensionContext): KarkainExtensionApi 
     vscode.commands.registerCommand('karkain.build', () => {
       const doc = activeKarkainDocument();
       if (doc) {
+        // Every argument below is resolved against the folder owning this file,
+        // so a multi-root window builds with the right root's settings.
+        const scope = configScopeFor(doc.uri.fsPath);
         runInTerminal(
           'karkain build',
-          applyTarget(buildArgs(doc.uri.fsPath), getTarget()),
+          applyTarget(buildArgs(doc.uri.fsPath), getTarget(scope)),
           effectiveCwd(doc.uri.fsPath),
+          scope,
         );
       }
     }),
     vscode.commands.registerCommand('karkain.run', () => {
       const doc = activeKarkainDocument();
       if (doc) {
+        const scope = configScopeFor(doc.uri.fsPath);
         runInTerminal(
           'karkain run',
-          applyTarget(runArgs(doc.uri.fsPath), getTarget()),
+          applyTarget(runArgs(doc.uri.fsPath), getTarget(scope)),
           effectiveCwd(doc.uri.fsPath),
+          scope,
         );
       }
     }),
     vscode.commands.registerCommand('karkain.clean', () => {
       const doc = vscode.window.activeTextEditor?.document;
+      // Clean is project-scoped: it runs in the active file's project root, else
+      // its workspace folder. With no active document it uses the first root,
+      // which is the pre-existing single-root behaviour, unchanged.
       const cwd = doc ? effectiveCwd(doc.uri.fsPath) : vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-      runInTerminal('karkain clean', cleanArgs(), cwd);
+      runInTerminal('karkain clean', cleanArgs(), cwd, configScopeForDoc(doc));
     }),
     vscode.commands.registerCommand('karkain.debug', () => {
       void runDebug();
@@ -938,9 +1106,14 @@ export function activate(context: vscode.ExtensionContext): KarkainExtensionApi 
       }
     }),
     vscode.commands.registerCommand('karkain.selectToolchain', async () => {
-      const found = discoverToolchains();
-      const configured = getCompilerPath();
-      const inUse = resolvedCompilerPath();
+      // Multi-root: a folder-scoped selection must not be written as a
+      // workspace-wide value, or choosing a toolchain for root A would silently
+      // change root B too. `scopeFolder` is the active file's folder; with no
+      // active document the selection is workspace-wide, as before.
+      const scopeFolder = configScopeForDoc(vscode.window.activeTextEditor?.document);
+      const found = discoverToolchains(scopeFolder);
+      const configured = getCompilerPath(scopeFolder);
+      const inUse = resolvedCompilerPath(scopeFolder);
       if (found.length === 0) {
         void vscode.window.showWarningMessage(
           `Karkain: no karkain executable found on PATH (current setting: ${configured}). Install Karkain 1.1.0+ or set karkain.compilerPath.`,
@@ -952,7 +1125,11 @@ export function activate(context: vscode.ExtensionContext): KarkainExtensionApi 
           label: p,
           description: p === configured ? 'configured' : p === inUse ? 'in use' : '',
         })),
-        { placeHolder: 'Select the Karkain toolchain executable' },
+        {
+          placeHolder: scopeFolder
+            ? `Select the Karkain toolchain for ${scopeFolder.name}`
+            : 'Select the Karkain toolchain executable',
+        },
       );
       if (!pick) {
         return;
@@ -961,10 +1138,22 @@ export function activate(context: vscode.ExtensionContext): KarkainExtensionApi 
         void vscode.window.showErrorMessage(`Karkain: ${pick.label} no longer exists.`);
         return;
       }
-      const folder = vscode.workspace.workspaceFolders?.[0];
-      const target = folder ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
-      await vscode.workspace.getConfiguration('karkain').update('compilerPath', pick.label, target);
-      log(`Karkain toolchain selected: ${pick.label}`);
+      // Single-root keeps the original workspace-wide write. With multiple
+      // roots and a folder in context, write folder-scoped so the choice is
+      // isolated to the root the user is working in.
+      const multiRoot = (vscode.workspace.workspaceFolders?.length ?? 0) > 1;
+      const target =
+        multiRoot && scopeFolder
+          ? vscode.ConfigurationTarget.WorkspaceFolder
+          : vscode.workspace.workspaceFolders?.[0]
+            ? vscode.ConfigurationTarget.Workspace
+            : vscode.ConfigurationTarget.Global;
+      await vscode.workspace
+        .getConfiguration('karkain', scopeFolder)
+        .update('compilerPath', pick.label, target);
+      log(
+        `Karkain toolchain selected: ${pick.label}${target === vscode.ConfigurationTarget.WorkspaceFolder ? ` (${scopeFolder?.name} only)` : ''}`,
+      );
       vscode.window.setStatusBarMessage(`Karkain: toolchain set to ${pick.label}`, 5000);
       await probeToolchain();
     }),
@@ -984,7 +1173,12 @@ export function activate(context: vscode.ExtensionContext): KarkainExtensionApi 
       void vscode.commands.executeCommand('editor.action.formatDocument');
     }),
     vscode.commands.registerCommand('karkain.selectTarget', async () => {
-      const peer = await execTool(targetArgs(), vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
+      // Multi-root: list targets for the active file's folder and write the
+      // choice folder-scoped, so root B's target is not changed by a selection
+      // made while working in root A.
+      const scopeFolder = configScopeForDoc(vscode.window.activeTextEditor?.document);
+      const probeCwd = scopeFolder?.uri.fsPath ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      const peer = await execTool(targetArgs(), probeCwd);
       if (peer.code !== 0) {
         log(`karkain target failed (exit ${peer.code}):\n${peer.stderr || peer.stdout}`);
         void vscode.window.showErrorMessage(
@@ -1014,15 +1208,23 @@ export function activate(context: vscode.ExtensionContext): KarkainExtensionApi 
       if (!pick || pick.kind === vscode.QuickPickItemKind.Separator) {
         return;
       }
-      const folder = vscode.workspace.workspaceFolders?.[0];
+      const multiRoot = (vscode.workspace.workspaceFolders?.length ?? 0) > 1;
       await vscode.workspace
-        .getConfiguration('karkain')
+        .getConfiguration('karkain', scopeFolder)
         .update(
           'target',
           pick.value,
-          folder ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global,
+          multiRoot && scopeFolder
+            ? vscode.ConfigurationTarget.WorkspaceFolder
+            : vscode.workspace.workspaceFolders?.[0]
+              ? vscode.ConfigurationTarget.Workspace
+              : vscode.ConfigurationTarget.Global,
         );
-      log(`Karkain target selected: ${pick.value === '' ? '(host default)' : pick.value}`);
+      log(
+        `Karkain target selected: ${pick.value === '' ? '(host default)' : pick.value}${
+          multiRoot && scopeFolder ? ` (${scopeFolder.name} only)` : ''
+        }`,
+      );
       updateTargetStatus();
       vscode.window.setStatusBarMessage(
         `Karkain: target set to ${pick.value === '' ? 'host default' : pick.value}`,
@@ -1031,20 +1233,51 @@ export function activate(context: vscode.ExtensionContext): KarkainExtensionApi 
     }),
     vscode.commands.registerCommand('karkain.showEnvironment', async () => {
       channel?.show(true);
-      log(`executable: ${getCompilerPath()} (resolved: ${resolvedCompilerPath()})`);
-      log(`selected target: ${getTarget() === '' ? '(host default)' : getTarget()}`);
       const active = vscode.window.activeTextEditor?.document;
-      log(`project root: ${active ? (findProjectRoot(active.uri.fsPath) ?? '(none)') : '(no active file)'}`);
-      log(`toolchains on PATH: ${discoverToolchains().join(', ') || '(none)'}`);
+      // Multi-root: report against the active file's folder so the numbers shown
+      // are the ones that will actually be used, and list every root rather than
+      // only the first.
+      const scopeFolder = configScopeForDoc(active);
+      const roots = vscode.workspace.workspaceFolders ?? [];
+      if (roots.length > 1) {
+        log(`workspace roots (${roots.length}): ${roots.map((r) => r.name).join(', ')}`);
+      }
+      log(`active folder: ${scopeFolder ? scopeFolder.name : '(none — active file is outside every root)'}`);
+      log(`executable: ${getCompilerPath(scopeFolder)} (resolved: ${resolvedCompilerPath(scopeFolder)})`);
+      log(
+        `selected target: ${
+          getTarget(scopeFolder) === '' ? '(host default)' : getTarget(scopeFolder)
+        }${scopeFolder ? ` (${scopeFolder.name})` : ''}`,
+      );
+      const project = active ? loadProject(active.uri.fsPath) : null;
+      log(`project root: ${project ? project.root : '(none)'}`);
+      if (project) {
+        const m = project.manifest;
+        log(
+          `project: ${describeProject(m) ?? '(unnamed)'} (license: ${m.license ?? 'unset'}, targets: ${
+            m.targets.length > 0 ? m.targets.join(', ') : 'unset'
+          })`,
+        );
+        // Honest about partial reads rather than implying a clean manifest.
+        if (m.sections.length > 0) {
+          log(`project manifest sections not modelled: ${m.sections.join(', ')}`);
+        }
+        if (m.extraKeys.length > 0) {
+          log(`project manifest keys not modelled: ${m.extraKeys.join(', ')}`);
+        }
+      } else if (active) {
+        log('project manifest: not found or unreadable');
+      }
+      log(`toolchains on PATH: ${discoverToolchains(scopeFolder).join(', ') || '(none)'}`);
+      // Probe from the active file's folder; with no active file, the first root.
+      const probeCwd = scopeFolder?.uri.fsPath ?? roots[0]?.uri.fsPath;
       for (const args of [versionArgs(), targetArgs(), configArgs()]) {
-        const r = await execTool(args, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
+        const r = await execTool(args, probeCwd);
         log(`$ karkain ${args.join(' ')} (exit ${r.code})\n${r.stdout}${r.stderr}`);
       }
     }),
     vscode.commands.registerCommand('karkain.restartLanguageServer', async () => {
-      await restartLanguageClient();
-      // Awaited so a stop can never race the next start.
-      await startLanguageClient(context);
+      await restartLanguageClientAndStart(context);
       vscode.window.setStatusBarMessage('Karkain: language server restarted', 3000);
     }),
     vscode.tasks.registerTaskProvider('karkain', {
@@ -1052,6 +1285,10 @@ export function activate(context: vscode.ExtensionContext): KarkainExtensionApi 
         const tasks: vscode.Task[] = [];
         const doc = vscode.window.activeTextEditor?.document;
         const isKark = !!doc && (doc.languageId === 'karkain' || isKarkFile(doc.uri.fsPath));
+        // Multi-root: the owning folder of the active file. `??` to the first
+        // root preserves the pre-existing behaviour when there is no active
+        // document; a file that belongs to no root still resolves to undefined
+        // in resolveTaskDefinition, which scopes its settings honestly.
         const folder =
           (doc && vscode.workspace.getWorkspaceFolder(doc.uri)) ?? vscode.workspace.workspaceFolders?.[0];
         if (isKark && doc) {
@@ -1102,7 +1339,13 @@ export function activate(context: vscode.ExtensionContext): KarkainExtensionApi 
       if (formattingOnSave) {
         return;
       }
-      if ((doc.languageId === 'karkain' || isKarkFile(doc.uri.fsPath)) && getFormatOnSave()) {
+      // Multi-root: formatOnSave is folder-scoped, so it must be read for the
+      // saved file's own folder. Reading it unscoped would apply root A's
+      // preference to a file saved in root B.
+      if (
+        (doc.languageId === 'karkain' || isKarkFile(doc.uri.fsPath)) &&
+        getFormatOnSave(configScopeForDoc(doc))
+      ) {
         formattingOnSave = true;
         void (async () => {
           try {
@@ -1115,10 +1358,44 @@ export function activate(context: vscode.ExtensionContext): KarkainExtensionApi 
       }
     }),
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('karkain')) {
-        void probeToolchain();
-        updateTargetStatus();
+      if (!e.affectsConfiguration('karkain')) {
+        return;
       }
+      void probeToolchain();
+      updateTargetStatus();
+      // A changed compilerPath invalidates the running server: it was spawned
+      // from the previous executable and would keep answering for a toolchain
+      // the user has moved away from. Restart it, and say so in the output
+      // channel so the brief loss of intelligence is never silent.
+      //
+      // There is deliberately ONE language client for the whole window, not one
+      // per root: `karkain lsp` is a single stdio server and the client owns the
+      // document selector for every root. The restart is reported for the
+      // affected folder so a per-folder change is still explained.
+      if (e.affectsConfiguration('karkain.compilerPath')) {
+        const scope = configScopeForDoc(vscode.window.activeTextEditor?.document);
+        const next = getCompilerPath(scope);
+        log(
+          `karkain.compilerPath changed to '${next}'${
+            scope ? ` for ${scope.name}` : ''
+          }; restarting the language server.`,
+        );
+        void restartLanguageClientAndStart(context).then(() =>
+          vscode.window.setStatusBarMessage('Karkain: language server restarted (toolchain changed)', 3000),
+        );
+      }
+    }),
+    // Multi-root: roots can be added or removed while the window is open. The
+    // extension keeps exactly one client, one diagnostic collection, one test
+    // controller and one watcher regardless of how many roots exist, so there is
+    // nothing to construct or tear down here — but the status bar and toolchain
+    // facts are folder-scoped and must be recomputed against the new root set.
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      const roots = vscode.workspace.workspaceFolders ?? [];
+      log(
+        `workspace folders changed: ${roots.length} root(s)${roots.length > 1 ? ` (${roots.map((r) => r.name).join(', ')})` : ''}`,
+      );
+      updateTargetStatus();
     }),
     vscode.workspace.onDidSaveTextDocument((doc) => {
       if (testController && isTestFileUri(doc.uri)) {
@@ -1142,9 +1419,21 @@ export function activate(context: vscode.ExtensionContext): KarkainExtensionApi 
   return { setToolchainService, reportServerCapabilities };
 }
 
-export function deactivate(): Thenable<void> | undefined {
-  if (client) {
-    return client.stop();
+export function deactivate(): Promise<void> | undefined {
+  const c = client;
+  client = null;
+  if (!c) {
+    return undefined;
   }
-  return undefined;
+  // deactivate() must never reject: VS Code logs a rejected deactivate and
+  // then tears the pipe down on its own terms. A server that cannot stop
+  // cleanly (e.g. one that ignores `exit` after a failed shutdown) must not
+  // take the extension host's teardown down with it — log and let the host
+  // dispose the transport.
+  return Promise.resolve(c.stop()).then(
+    () => undefined,
+    (err: unknown) => {
+      log(`language client did not stop cleanly: ${err instanceof Error ? err.message : String(err)}`);
+    },
+  );
 }

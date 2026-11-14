@@ -1,8 +1,8 @@
 {
   "name": "karkain",
   "displayName": "Karkain Language Tools",
-  "description": "Development environment for the Karkain programming language (.kark): syntax highlighting, Karkain CLI integration (check, build, run, format) and Karkain Language Server (karkain lsp) intelligence. Requires the Karkain 1.1.0 toolchain.",
-  "version": "0.9.1",
+  "description": "Development environment for the Karkain programming language (.kark): syntax highlighting, Karkain CLI integration (check, build, run, format) and Karkain Language Server (karkain lsp) intelligence. Requires Karkain 1.1.0 or newer (verified against 1.2.0).",
+  "version": "1.0.0",
   "publisher": "karkain",
   "license": "MIT",
   "icon": "images/karkain-icon.png",
@@ -180,22 +180,26 @@
         "karkain.compilerPath": {
           "type": "string",
           "default": "karkain",
-          "description": "Path to the Karkain compiler executable (absolute path or a name resolved via PATH)."
+          "scope": "resource",
+          "description": "Path to the Karkain compiler executable (absolute path or a name resolved via PATH). In a multi-root window this can be set per folder."
         },
         "karkain.debuggerPath": {
           "type": "string",
           "default": "gdb",
-          "description": "Path to the GDB executable used for native debugging of Karkain-built binaries (absolute path or a name resolved via PATH)."
+          "scope": "resource",
+          "description": "Path to the GDB executable used for native debugging of Karkain-built binaries (absolute path or a name resolved via PATH). In a multi-root window this can be set per folder."
         },
         "karkain.formatOnSave": {
           "type": "boolean",
           "default": false,
-          "description": "Format .kark documents on save using `karkain fmt`. Requires Karkain 1.1.0 or newer."
+          "scope": "resource",
+          "description": "Format .kark documents on save using `karkain fmt`. Requires Karkain 1.1.0 or newer. In a multi-root window this can be set per folder."
         },
         "karkain.target": {
           "type": "string",
           "default": "",
-          "description": "Target triple passed as --target to build/run (empty means the host default). See `karkain target` for supported values."
+          "scope": "resource",
+          "description": "Target triple passed as --target to build/run (empty means the host default). See `karkain target` for supported values. In a multi-root window this can be set per folder."
         }
       }
     }
@@ -210,6 +214,7 @@
     "test:unit": "npm run compile && mocha",
     "test:integration": "npm run compile && node scripts/run-integration.mjs",
     "test:lsp-smoke": "node scripts/lsp-smoke.mjs",
+    "test:lsp-smoke:proxy": "node scripts/lsp-smoke.mjs --through-proxy",
     "test:toolchain-smoke": "node scripts/toolchain-smoke.mjs",
     "package": "vsce package"
   },

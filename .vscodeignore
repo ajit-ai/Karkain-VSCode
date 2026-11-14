@@ -19,5 +19,8 @@ out/test/**
 docs/**
 fixtures/**
 scripts/**
+# Local audit scratch from the LSP-reliability recovery; never shipped:
+.audit/**
+.audit*.txt
 # templates/ is intentionally shipped: the README tells users to copy
 # templates/launch.json and templates/tasks.json into their own workspace.

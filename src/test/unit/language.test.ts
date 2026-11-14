@@ -369,6 +369,23 @@ describe('language assets', () => {
       );
     });
 
+    it('declares every setting with resource scope (required for multi-root)', () => {
+      // VS Code's implicit default scope is "window", which makes a setting
+      // unreadable per-folder: `getConfiguration('karkain', folder)` would still
+      // return the window-wide value, and writing with
+      // ConfigurationTarget.WorkspaceFolder is rejected outright
+      // ("does not support the folder resource scope"). Declaring "resource" is
+      // what makes per-folder settings actually resolve per folder.
+      const karkain = manifest.contributes.configuration.properties;
+      for (const [key, schema] of Object.entries<Record<string, unknown>>(karkain)) {
+        assert.strictEqual(
+          schema.scope,
+          'resource',
+          `${key} must declare "scope": "resource" so it resolves per workspace folder`,
+        );
+      }
+    });
+
     it('registers no DocumentFormattingEditProvider in the compiled extension', () => {
       const compiled = path.join(repoRoot(), 'out', 'extension.js');
       if (!fs.existsSync(compiled)) {

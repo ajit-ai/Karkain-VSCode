@@ -13,7 +13,8 @@ src/
   toolchain.ts    pure: version parse/compare, .kark match, argv builders
   diagnostics.ts  pure: check --format=json schema-v1 parsing/validation
   lsp.ts          pure: server capability negotiation, version gate, symbol kinds
-  project.ts      pure: karkain.toml root detection
+  project.ts      pure: karkain.toml root detection + manifest parsing
+  workspace.ts    pure: multi-root ownership (which root contains this path)
   tasks.ts        pure: task argv/label/group builders
   testing.ts      pure: test discovery + PASS/FAIL/summary parsing
   debug.ts        pure: -g build argv, program path, cppdbg launch/attach configs
@@ -118,6 +119,125 @@ pure helpers in `src/diagnostics.ts`:
 - **Working directory** — `runCheck` uses the same `effectiveCwd` model as every
   other file command (karkain.toml project root, else workspace folder, else
   undefined), which also anchors relative diagnostic paths.
+
+## Language client lifecycle
+
+There is exactly one language client, held in a single module-level slot. Every
+path that replaces it goes through `restartLanguageClientAndStart`, which
+serializes stop-then-start behind one in-flight promise: concurrent callers
+share the same run instead of interleaving for the slot, and a stop can never
+race the next start. It is reached from two places:
+
+- the `Karkain: Restart Language Server` command, and
+- `onDidChangeConfiguration`, when `karkain.compilerPath` changes.
+
+The second case matters because the server is spawned from the resolved
+executable at start time: without a restart, a changed `compilerPath` would
+leave the old toolchain's server answering while the UI reported the new path.
+The restart is logged and confirmed in the status bar — a brief loss of language
+intelligence is never silent.
+
+`deactivate()` must never reject: it stops the client inside an explicit
+rejection handler and logs the failure instead of throwing. A server that
+cannot stop cleanly must not take extension-host teardown down with it.
+
+### Protocol repair shim (`out/lsp-proxy.js`)
+
+`karkain lsp` answers responses with **neither `result` nor `error`** for
+every handler that produces no value (unresolvable hover/definition, and
+**every** `shutdown` — always, unconditionally; see
+`docs/KARKAIN-INSPECTION.md` §8.3). vscode-languageclient classifies that
+envelope as neither a response nor a notification and rejects the pending
+request with "The received response has neither a result nor an error
+property.", which on the stop path ALSO prevents the `exit` notification,
+leaving the server to break its stdin pipe abnormally (observed as exit code 1
+from the Go side: `cmd/karkain` `handleLSP` exits `ExitFailure` on any
+non-EOF read error).
+
+The extension therefore spawns the server through a standalone, dependency-free
+shim (`src/lsp-proxy.ts`, compiled to `out/lsp-proxy.js`, shipped in the VSIX):
+
+- It frames the server→client byte stream (Content-Length) and rewrites ONLY
+  envelopes that carry an `id` but neither `result` nor a non-null `error`,
+  adding `"result": null` — the JSON-RPC 2.0 / LSP-spec answer. Notifications,
+  requests, valid responses and error responses pass through byte-for-byte.
+- All other bytes are forwarded unmodified; an unframable stream is passed
+  through verbatim with a one-time stderr notice (never guessed at).
+- Repairs are logged to **stderr**, which the client forwards to the Karkain
+  Language Server output channel — the repair is visible, never silent.
+- The client spawns the shim as `node out/lsp-proxy.js <karkain exe> lsp` via
+  the extension host's own Electron binary with `ELECTRON_RUN_AS_NODE=1`
+  (no separate Node runtime on user machines). Verified on this machine with
+  the local VS Code Electron against the real v1.2.0 binary.
+- The shim mirrors process lifecycle: signals/EOF flow to the child, and the
+  proxy exits with the child's exit code (verified: clean code 0 on stdin
+  EOF after `exit`).
+- Once Karkain fixes `JSONRPCResponse.Result` omitempty upstream, every
+  message passes through unchanged — a harmless pipe, kept for safety.
+- If `out/lsp-proxy.js` is missing, the extension spawns `karkain lsp`
+  directly and logs the degraded state rather than failing activation.
+
+## Project model
+
+`src/project.ts` owns both halves of the project concept: locating a
+`karkain.toml` and reading it. The parser is a deliberately small TOML subset
+(flat top-level `key = value` assignments) because that is what Karkain 1.1.0
+`pkg init` actually emits — not the `[package]` table sketched in SPEC §10.1.
+It models `name`, `version`, `description`, `license` and `targets`, and records
+everything else it meets (`sections`, `extraKeys`) rather than guessing, so
+`Karkain: Show Environment` can distinguish "absent" from "present but unread".
+
+## Multi-root windows
+
+A workspace may have any number of roots, and two of them may be entirely
+different Karkain projects. Nothing in the extension may therefore assume that
+"the" project, "the" target or "the" compiler path is a single value.
+
+**Ownership is one rule, in one place.** `src/workspace.ts` is pure and
+vscode-free, and holds the whole decision:
+
+- the **longest** containing root wins, so a nested root resolves to itself
+  rather than to its parent;
+- matching is **segment-boundary aware**, so `/proj/app` never claims
+  `/proj/application` — the classic string-prefix bug;
+- case folds only on the case-insensitive filesystems (`win32`, `darwin`), so
+  distinct-case roots stay distinct on Linux;
+- a file outside every root resolves to **nothing**. Falling back to
+  `workspaceFolders[0]` would fabricate an association with an unrelated
+  project, and the resulting `cwd` would silently be the wrong directory.
+
+`isPathInsideRoot` handles the platform explicitly and is unit-tested without
+Electron, which is why the rule can be tested exhaustively at all.
+
+**Settings are resolved with a resource scope.** Every getter in
+`src/config.ts` takes an optional `scope`. This is not a stylistic choice: an
+unscoped `vscode.workspace.getConfiguration('karkain')` returns the **first
+folder's** value for every file in the window, so the unscoped form silently
+gave root B root A's toolchain, target and format-on-save. Call sites pass the
+folder that owns the file being acted on (`configScopeFor` /
+`configScopeForDoc`). All four settings are declared `"scope": "resource"` in
+the manifest so they can be set per folder in the first place.
+
+**Commands resolve from the acted-on file.** `effectiveCwd` walks up to the
+nearest `karkain.toml`, falling back to the file's owning folder. Tasks,
+`runInTerminal`, the toolchain picker and the target picker all derive their
+scope from the file in question. The pickers _write_ folder-scoped in a
+multi-root window, so a choice made for one root does not change another, and
+they fall back to the workspace-level setting when there is no active file
+rather than to an arbitrary root's.
+
+**One language client, deliberately.** `karkain lsp` is a single stdio server,
+and the client selects every `karkain` document regardless of root, so one
+client already serves a multi-root window. The consequence is stated rather
+than hidden: the server runs from the **workspace-wide**
+`karkain.compilerPath`, so a per-folder compiler path governs CLI commands,
+tasks and formatting but _not_ the server's own executable. Per-root clients
+would duplicate the server, its output channel and the diagnostics stream, and
+concurrently running two toolchains is a different design, not a bug fix.
+
+Folder add/remove is observed via `onDidChangeWorkspaceFolders` so folder-scoped
+status and toolchain facts are recomputed against the new root set instead of
+going stale.
 
 ## Diagnostic engine probing (compatibility, not redundancy)
 

@@ -2,22 +2,27 @@
 
 ## Versioning
 
-Semantic Versioning, currently pre-1.0 (`0.x`). The activation banner reads
-the version from the manifest at runtime, so no source edit is needed for a
-bump. 1.0 is declared only when every §30 gate holds: core language support,
-diagnostics, build, run, IntelliSense, tests, green CI, VSIX packaging,
-complete docs and understood cross-platform behavior — plus real-world
-validation beyond this repository.
+Semantic Versioning. The manifest currently declares **1.0.0**, an unpublished
+release candidate: the Windows gates are green locally, but macOS/Linux legs
+have not run and no real-world validation beyond this repository exists. 1.0
+is only _declared released_ when every gate holds: core language support,
+diagnostics, build, run, IntelliSense, tests, green CI on all three OSes,
+VSIX packaging, complete docs and understood cross-platform behavior — plus an
+explicit owner decision. Do not tag, release or publish this build.
+
+The activation banner reads the version from the manifest at runtime, so no
+source edit is needed for a bump.
 
 ## Cutting a release (owner)
 
 1. Update `CHANGELOG.md` (new `## [x.y.z]` section) and bump `version` in
    `package.json` (keep the README `.vsix` filename in sync).
 2. Run the full gate locally: `typecheck`, `lint`, `format:check`,
-   `test:unit`, both smoke gates against a 1.1.0+ binary, `package`, install
-   the `.vsix` and smoke-test (open `.kark`, check, build, run, test).
+   `test:unit`, `test:lsp-smoke:proxy` against a 1.2.0+ binary,
+   `test:integration`, `package`, install the `.vsix` and smoke-test (open
+   `.kark`, check, build, run, test).
 3. Commit to `develop`, merge to `main`, push both.
-4. Tag and push the tag: `git tag v0.9.0 && git push origin v0.9.0`. The tag
+4. Tag and push the tag: `git tag v1.0.0 && git push origin v1.0.0`. The tag
    must match `package.json` or the release workflow fails fast.
 5. `release.yml` validates, packages and creates the GitHub Release with the
    `.vsix` asset and the CHANGELOG section as notes. Verify the Release page
