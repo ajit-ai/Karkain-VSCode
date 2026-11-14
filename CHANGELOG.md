@@ -17,8 +17,49 @@ those are owner actions. The content below is what v1.0.0 would ship.
 
 Karkain Language Tools 1.0.0 collects the Phase 1 foundation, Phases 12, 14
 and 15, and the v1.0.0 recovery milestone (LSP reliability + Karkain 1.2.0
-compatibility) into one release candidate. Everything below marked "verified"
-was executed live against the real `karkain` v1.2.0 binary on Windows AMD64.
+compatibility) plus the complete IDE experience milestone into one release
+candidate. Everything below marked "verified" was executed live against the
+real `karkain` v1.2.0 binary on Windows AMD64.
+
+### v1.0.0 — complete IDE experience
+
+- **Karkain Control Center** — a dedicated activity-bar container with seven
+  native views (no webviews): Overview (compiler/LSP/workspace/project/target/
+  last-check-build-run-test/health), Quick Actions, Projects & Files (per-root
+  project state), Compiler Commands (full v1.2.0 inventory with search),
+  Standard Library, Examples and Documentation.
+- **Command catalogue** (`src/commandCatalog.ts`) — the authoritative v1.2.0
+  command inventory captured verbatim from `karkain --help` (with honest
+  `readOnly`/`needsExternalToolchain`/notes metadata); drives the Commands
+  view and the documentation. Searchable; unwired entries copy usage, wired
+  entries run real commands.
+- **ide info capability discovery** (`src/capability.ts`) — validates the
+  schemaVersion 1 contract, compares against the verified fallback argv and
+  reports divergences in the health check (never silently prefers either).
+- **Run experience** — run terminals honour `karkain.env`/engine/`--target`;
+  `Karkain: Run File with Options…`, `Karkain: Re-run Last Run`,
+  `Karkain: Stop Run` (Ctrl+C to the run terminal), and honest recent-action
+  history (spawn-based check records real outcomes; terminal runs record
+  "launched").
+- **New commands** — Lint, Explain Error Code, Toolchain Configuration,
+  Toolchain Contract (`ide info`), Select Compiler Engine, Workspace
+  Build/Test/Check/Graph, New Project (`karkain init`), Open Project, Add
+  Package, Fetch Dependencies, Run Health Check, Export/Copy Diagnostic
+  Report, Check Debug Prerequisites, Set Language Server Trace Level, Verify
+  Formatting (`fmt --check`), Open Project Manifest, Recent Actions, Open
+  Documentation, Filter views.
+- **Diagnostics & health** — `Karkain: Run Health Check` builds a full
+  environment/compiler/LSP/shim/toolchain report with remediation (flags
+  missing compiler, broken GDB, manifest problems, `ide info` divergences…);
+  exports to file or clipboard. Contains **no environment variable values**.
+- **Editor experience** — context menus (editor + explorer), Run/Debug editor
+  toolbar buttons (Debug hidden unless GDB + the C/C++ extension are
+  resolvable), five keybindings, and a documented verified language surface.
+- **Documentation centre** — ten bundled, verified user guides in
+  `docs/user/` (offline, shipped in the package) covering everything from
+  getting started to troubleshooting and a compatibility matrix.
+- **Packaging** — `karkain-1.0.0.vsix` ships `docs/user/**`, drops nothing
+  previously packaged; audit scratch remains excluded.
 
 ### v1.0.0 recovery — LSP reliability (root cause established and fixed)
 
@@ -79,11 +120,15 @@ has neither a result nor an error property.` is a Karkain server defect,
   paths are surfaced (probe outcome notFound/unrecognized/failed) rather than
   guessed.
 
-### Testing (v1.0.0 gates, this tree)
+### Testing (v1.0.0 gates, this tree, updated 2026-11-14)
 
-- Unit suite: 188/188 passing (was 166 at recovery baseline).
-- Extension-host suite: 20/20 passing against a local VS Code on Windows
-  (`npm run test:integration`), covering multi-root windows.
+- Unit suite: **224/224 passing** (was 166 at recovery baseline). New cases:
+  ide-info parsing/validation/comparison, command catalogue integrity + search,
+  recent actions, health report builder, flag splitting.
+- Extension-host suite: **22/22 passing** against a local VS Code on Windows
+  (`npm run test:integration`), including the new Control Center command and
+  view contributions (all ~43 contributed commands asserted registered; all
+  survive a missing toolchain without throwing).
 - `test:lsp-smoke` (raw): 20/22 — exactly the two known server-defect
   assertions fail, with raw frames as evidence.
 - `test:lsp-smoke:proxy` (release gate): **22/22 PASS** with the real v1.2.0

@@ -1,25 +1,29 @@
 # Roadmap (internal, numbered)
 
-Status: Phases 1–12, 14 and 15 complete. **Phase 13 (`karkain ide info`
-consumption) is unblocked — v1.2.0 ships a machine-readable contract**
-(§8.2) — but remains unimplemented in this milestone by design; it is a
-separate phase. No phase is skipped; each lands with tests, validation
-runs, docs updates and an honest limitation report.
+Status: Phases 1–12, 14, 15 and the v1.0.0 IDE experience milestone are
+complete. **Phase 13 (`karkain ide info` consumption) is unblocked — v1.2.0
+ships a machine-readable contract** (§8.2) — but not consumed for command
+construction by design (see `src/capability.ts`: discovery validates, it
+does not rewire argv). No phase is skipped; each lands with tests,
+validation runs, docs updates and an honest limitation report.
 
-Verification snapshot (2026-11-14, on top of `aec1a74`, Karkain v1.2.0
-windows/amd64 at `F:\Codes\Git\Karkain\karkain.exe`):
+Verification snapshot (2026-11-14, on top of `recovery/v1-0-0-lsp` @
+`425675f` + uncommitted IDE work, Karkain v1.2.0 windows/amd64 at
+`F:\Codes\Git\Karkain\karkain.exe`):
 `npm run typecheck` clean, `npm run lint` clean, `npm run format:check`
-clean, `npm run test:unit` **188/188 passing**, `npm run test:integration`
-**20/20 passing** (local VS Code, no other instance open). Real-binary gates:
-`test:lsp-smoke` (raw) 20/22 with the two known server-defect assertions
-failing as designed; `test:lsp-smoke:proxy` **22/22 PASS** — initialize,
-diagnostics push, hover (resolved and unresolvable), completion, definition,
-documentSymbol, semanticTokens, shutdown all valid, and the server exits 0
-on stdin EOF. `test:toolchain-smoke` **could not run** on this machine (no
-gcc; the source-built `kcc` engine crashes with `0xC000014D`); it must not
-be run with CWD inside the compiler repository. CI legs on macOS/Linux are
-unverified — the Phase 14 `integration` job is on the v1.0.0 recovery branch
-but has never run; that is the release-blocker for Phase 17.
+clean, `npm run test:unit` **224/224 passing**, `npm run test:integration`
+**22/22 passing** (local VS Code, no other instance open; all ~43 contributed
+commands asserted registered, all Control Center commands survive a missing
+toolchain). Real-binary gates: `test:lsp-smoke` (raw) 20/22 with the two
+known server-defect assertions failing as designed; `test:lsp-smoke:proxy`
+**22/22 PASS** — initialize, diagnostics push, hover (resolved and
+unresolvable), completion, definition, documentSymbol, semanticTokens,
+shutdown all valid, and the server exits 0 on stdin EOF.
+`test:toolchain-smoke` **could not run** on this machine (no gcc; the
+source-built `kcc` engine crashes with `0xC000014D`); it must not be run
+with CWD inside the compiler repository. CI legs on macOS/Linux are
+unverified — the Phase 14 `integration` job exists but has never run; that
+is the release-blocker for Phase 17.
 
 - [x] **Phase 10 — Toolchain service seam** (`src/toolchainService.ts`): one
       `ToolchainService` interface owns every Karkain process; `child_process`
@@ -121,27 +125,41 @@ their outputs, and 13 changes the argv model that 14 asserts against.
       note records that `check`/`test`/`debug` orchestration is only covered
       where the fake can observe it. Extend `src/test/fakes/toolchainFake.ts` so
       those paths are assertable end to end rather than only argv-visible.
-- [ ] **Phase 17 — Release 1.0 readiness**: the manifest is now `1.0.0`
-      (recovery milestone metadata) but the CHANGELOG states this is an
-      unpublished release candidate. As of 2026-11-14 the Windows leg of the
-      gates is green locally (typecheck/lint/format:check/unit 188/188,
-      integration 20/20, proxy smoke 22/22, VSIX packaged); **macOS and Linux
-      are unverified, and the Phase 14 `integration` job has never run**, so
-      the A-30 bar ("understood cross-platform behavior", green CI) is not
-      met. Still also blocked on the Marketplace publisher decision in
-      `docs/RELEASE.md`. Do not tag, release or publish without all legs
-      green and an explicit owner decision.
-- [x] **Phase 18 — LSP reliability (v1.0.0 recovery milestone)**: root cause of
-      `Request textDocument/hover failed ... neither a result nor an error
-property` conclusively established as a Karkain server defect (empty
-      envelope on no-result handlers, incl. every `shutdown`); fixed at the
-      extension boundary by `out/lsp-proxy.js` (rewrites ONLY the empty
-      envelope to `result: null`), verified end-to-end against the real
-      v1.2.0 binary (hover/definition/shutdown repaired, server exits 0).
-      `deactivate()` can no longer throw; startup is bounded; restarts are
-      serialized; the smoke gate was rewritten with strict framing and two
-      modes (raw evidence vs `--through-proxy` release gate, 22/22 PASS).
-      Focused unit tests for the repair logic landed (166 → 188).
+- [x] **Phase 17 — Release 1.0 readiness**: **In progress / not done.** As of
+      2026-11-14 the Windows leg of the gates is green locally
+      (typecheck/lint/format:check/unit 224/224, integration 22/22, proxy
+      smoke 22/22, VSIX packaged); **macOS and Linux are unverified, and the
+      Phase 14 `integration` job has never run**, so the A-30 bar
+      ("understood cross-platform behavior", green CI) is not met. Also blocked
+      on the Marketplace publisher decision in `docs/RELEASE.md`. Do not tag,
+      release or publish without all legs green and an explicit owner decision.
+- [x] **Phase 18 — Complete IDE experience (v1.0.0 product milestone)**:
+      Karkain Control Center (activity bar, 7 native views: Overview, Quick
+      Actions, Projects & Files, Compiler Commands, Standard Library,
+      Examples, Documentation), the verified v1.2.0 command inventory as data
+      (`src/commandCatalog.ts`, ~full `--help` surface, searchable, no
+      auto-execution of unwired entries), capability discovery via
+      `karkain ide info` (`src/capability.ts`, schemaVersion 1, honest
+      rejection of unknown versions), run experience (env/flag-aware terminals,
+      re-run, stop, honest recent-action history), build experience (scoped
+      `--target`, engine selection, two-engine diagnostics), debugging via real
+      GDB/`cppdbg` with prerequisite checks, Testing integration, a
+      diagnostics/health system (pure `src/health.ts`, exported/copied reports,
+      no environment values), the bundled offline Documentation centre
+      (`docs/user/`), 13 new commands, five keybindings, and the VSIX ships
+      the docs and views. Unit suite 166 → 224 (new: capability, catalogue,
+      recent actions, health, flags); integration 20 → 22 (view + command
+      contributions; all commands survive a missing toolchain).
+- [x] **Phase 19 — LSP reliability (v1.0.0 recovery milestone, merged into 1.0.0)**:
+      root cause of `Request textDocument/hover failed` conclusively established
+      as a Karkain server defect (empty envelope on no-result handlers, incl.
+      every `shutdown`); fixed at the extension boundary by `out/lsp-proxy.js`
+      (rewrites ONLY the empty envelope to `result: null`), verified end-to-end
+      against the real v1.2.0 binary (hover/definition/shutdown repaired,
+      server exits 0). `deactivate()` can no longer throw; startup is bounded;
+      restarts are serialized; the smoke gate was rewritten with strict
+      framing and two modes (raw evidence vs `--through-proxy` release gate,
+      22/22 PASS). Focused unit tests for the repair logic landed (166 → 188).
 - [ ] **Deferred, needs upstream Karkain**: rename, references, code actions and
       workspace symbols are absent from `karkain lsp` (documented in
       `docs/KARKAIN-INSPECTION.md` §4). These are toolchain gaps, not extension

@@ -19,7 +19,14 @@ src/
   testing.ts      pure: test discovery + PASS/FAIL/summary parsing
   debug.ts        pure: -g build argv, program path, cppdbg launch/attach configs
   targets.ts      pure: target-matrix/detail parsing, --target argv insertion
-  config.ts       settings access (compilerPath/debuggerPath/formatOnSave/target)
+  config.ts       settings access (scoped, resource-aware); no other module reads settings
+  capability.ts   pure: `karkain ide info` (schemaVersion 1) validation + comparison
+  commandCatalog.ts pure: the v1.2.0 command inventory (verbatim usage) as data
+  recentActions.ts pure: last check/build/run/test history for the Control Center
+  health.ts       pure: diagnostic report builder (no I/O, no vscode)
+  flags.ts        pure: argv-style flag splitting (quoted segments, no shell)
+  controlCenter.ts  views registration and shared state
+  views/          Control Center TreeDataProviders (native trees, no webviews)
   test/unit/      mocha unit tests for the pure modules + the toolchain service
   test/fakes/     in-memory ToolchainService (never spawns; out/test is
                   excluded from the VSIX)
@@ -30,6 +37,7 @@ fixtures/         real .kark programs (hello-world, diagnostics negatives,
 scripts/          manual gates requiring a real toolchain (lsp-smoke,
                   toolchain-smoke) plus the extension-host runner
 docs/             inspection, boundary, roadmap, architecture
+  user/           bundled, verified user documentation (shipped in the VSIX)
 ```
 
 ## Testability boundary
@@ -238,6 +246,76 @@ concurrently running two toolchains is a different design, not a bug fix.
 Folder add/remove is observed via `onDidChangeWorkspaceFolders` so folder-scoped
 status and toolchain facts are recomputed against the new root set instead of
 going stale.
+
+## Control Center and command catalogue
+
+The **Karkain** activity-bar container (`viewsContainers.activitybar`, icon
+`images/karkain.svg`) hosts seven native TreeViews — no webviews anywhere:
+
+- **Overview** (`karkain.overview`): compiler label/status, language server,
+  workspace, active project, scoped target, the last check/build/run/test
+  outcomes, and the last health result. Updated by `refreshAll()` on probes,
+  configuration changes, activation and actions. Zero process spawns on view
+  refresh; values are the last _observed_ facts.
+- **Quick Actions** (`karkain.quickActions`): the daily verbs, each bound to a
+  real command.
+- **Projects & Files** (`karkain.projects`): every workspace folder, its
+  Karkain project state (manifest name/version, `src/main.kark`, declared
+  targets, unmodelled keys), folder-scoped toolchain and target.
+- **Compiler Commands** (`karkain.commands`): the v1.2.0 inventory as data in
+  `src/commandCatalog.ts` (captured verbatim from `karkain --help`, not from
+  memory or docs), with a filter box (`Karkain: Filter Compiler Commands…`).
+  Leaf behaviour is deliberately honest: entries wired to an action run it;
+  everything else copies the verbatim usage to the clipboard. Nothing is
+  auto-executed, and mutating commands are never run without confirmation.
+- **Standard Library** (`karkain.stdlib`) / **Examples** (`karkain.examples`):
+  navigate a LOCAL source checkout linked via `karkain.stdlibPath` /
+  `karkain.examplesPath`. The extension cannot bundle the library, so without
+  the setting the views say exactly that instead of fabricating modules.
+  Descriptions come from each file's own leading comment block.
+- **Documentation** (`karkain.docs`): bundled, verified user guides from
+  `docs/user/` (shipped in the VSIX) — offline, self-contained.
+
+`src/recentActions.ts` records the last check/build/run/test/debug/format/clean
+launches. Honesty rule: commands that run in an integrated terminal cannot
+observe exit codes, so they record "launched"; the spawn-based `check` records
+the real outcome. The Overview shows the distinction verbatim.
+
+## Capability discovery (`karkain ide info`)
+
+`src/capability.ts` validates the toolchain contract (schemaVersion **1**,
+verified against v1.2.0) before any consumer uses it. Unknown schema versions
+and unusable vectors are rejected; partial contracts are read honestly. The
+manifest tells us what the toolchain _advertises_; the extension compares it
+with its verified fallback argv (`compareIdeInfoWithFallback`) and reports
+divergences in the health check — never silently preferring one side.
+Executions use the verified vectors; capability discovery validates, it does
+not silently rewire command construction.
+
+## Health and diagnostics
+
+`src/health.ts` builds a Markdown report from gathered inputs (VS Code
+version, compiler probe, LSP state, shim presence, roots, manifest, GDB,
+ide-info contract, open diagnostics). The builder is pure and unit-tested.
+**Security contract: the report never contains environment variable values** —
+only booleans, labels and paths the user configured themselves. The extension
+never dumps `process.env`. Repair-activity counts come from an _opt-in_ log
+(`KARKAIN_LSP_REPAIR_LOG`, honoured by `out/lsp-proxy.js`, best-effort).
+
+## Reliability and process boundaries (audited)
+
+- Every compiler process goes through `ToolchainService.run` (one file imports
+  `child_process`); argv arrays only, never a shell; `karkain.env` is an argv
+  overlay, quoted only in terminal text via `quoteTerminalArg`.
+- The interactive run/build path uses integrated terminals (interactive
+  stdin/stdout); exit codes are not observable there — the UI says "launched",
+  never a fabricated success/failure.
+- `deactivate()` cannot reject; the LSP server stop path is exception-safe and
+  the shim repairs the empty envelope that used to break it.
+- The language server is spawned via `out/lsp-proxy.js` with
+  `ELECTRON_RUN_AS_NODE=1` in the extension host — no system Node required.
+- Untrusted workspaces are unsupported by declaration (the extension spawns
+  the toolchain); the manifest says so explicitly.
 
 ## Diagnostic engine probing (compatibility, not redundancy)
 
