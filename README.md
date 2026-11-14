@@ -9,8 +9,7 @@ server's empty-envelope defect. This is an integration layer only — the
 compiler, runtime, formatter, test runner and language server live in the
 Karkain repository.
 
-Target release: **1.0.0** (unpublished release candidate; see "Release status"
-below).
+Karkain Language Tools v1.0.0. Released: see "Release status" below.
 
 ## Requirements
 
@@ -129,7 +128,7 @@ auto: manifest root → folder) · `karkain.trace.server` (`off`/`messages`/
 Changing `karkain.compilerPath` restarts the language server (logged,
 serialized).
 
-## Compatibility matrix (verified live on Windows AMD64)
+## Compatibility matrix (compiler behavior verified live on Windows AMD64; packaging/CI verified on Windows, Ubuntu and macOS)
 
 | Surface                                                                          | Status                                                             |
 | -------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
@@ -161,19 +160,31 @@ serialized).
   debugging targets are host-build only.
 - No native Debug Adapter; debugging is GDB via `cppdbg`.
 - Desktop VS Code only (native toolchain); `vscode.dev` unsupported.
-- **macOS/Linux legs are unverified in this build**; the CI matrix is declared
-  for all three OSes but has never run (see Release status).
+- Real-world use beyond this repository is limited by what is installed on
+  each machine: `check`/`build`/`run`/`test` require a C toolchain.
 
 ## Release status
 
-**1.0.0 is an unpublished release candidate.** Gates verified locally on
-Windows AMD64: compile, typecheck, lint, format:check, **unit 224/224**,
-**extension-host 22/22** (local VS Code), LSP smoke through the repair shim
-**22/22** (raw mode shows the two known server-defect assertions failing as
-designed). Not yet run: CI on macOS/Linux (the `integration` job exists but
-has never executed), `test:toolchain-smoke` (this machine lacks a C compiler;
-`kcc` crashes), real-world validation. Not tagged, not released, not
-published. See `docs/RELEASE.md`.
+**Karkain Language Tools 1.0.0 released.** Verified evidence:
+
+- PR #1 (`develop` → `main`) merged as merge commit `ceea1b80…` (the complete
+  v1.0.0 implementation).
+- CI run #13 (`43587837685`, push to `main`) — **all six validation and
+  integration jobs passed on Windows, Ubuntu and macOS**, each matrix leg
+  (`validate` and `extension-host suite`) green, with `vsce package`, lint,
+  format:check, unit tests (`224 passed`) and the extension-host suite
+  (`22 passed` locally on Windows, plus the three CI integration legs).
+- The LSP reliability work is verified by the raw and shimmed smoke gates
+  (the Karkain server still emits the empty-envelope defect; the extension
+  repairs it at the protocol boundary).
+- Compiler behavior re-verified live against Karkain v1.2.0 (Windows, AMD64);
+  see `docs/KARKAIN-INSPECTION.md`.
+
+Release qualification does **not** claim: working `check`/`build`/`run`/`test`
+end-to-end on every machine (local compiler/linker required), the upstream
+Karkain LSP empty-envelope fix (still the extension shim), Marketplace
+publication (not performed), or real-world user validation beyond this
+repository and CI. See `docs/RELEASE.md`.
 
 ## Development
 

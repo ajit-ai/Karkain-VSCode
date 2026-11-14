@@ -7,23 +7,23 @@ construction by design (see `src/capability.ts`: discovery validates, it
 does not rewire argv). No phase is skipped; each lands with tests,
 validation runs, docs updates and an honest limitation report.
 
-Verification snapshot (2026-11-14, on top of `recovery/v1-0-0-lsp` @
-`425675f` + uncommitted IDE work, Karkain v1.2.0 windows/amd64 at
-`F:\Codes\Git\Karkain\karkain.exe`):
+Verification snapshot (2026-11-14, v1.0.0 released; merge commit
+`ceea1b80260babd43511a6f6dbc85f3e27debd0b`; PR #1):
 `npm run typecheck` clean, `npm run lint` clean, `npm run format:check`
 clean, `npm run test:unit` **224/224 passing**, `npm run test:integration`
-**22/22 passing** (local VS Code, no other instance open; all ~43 contributed
-commands asserted registered, all Control Center commands survive a missing
-toolchain). Real-binary gates: `test:lsp-smoke` (raw) 20/22 with the two
+**22/22 passing** (local VS Code on Windows; all ~43 contributed commands
+asserted registered, all Control Center commands survive a missing
+toolchain). CI run #13 (`43587837685`, push to merged `main`): **all six
+validation and integration jobs passed on Windows, Ubuntu and macOS**.
+Real-binary gates: `test:lsp-smoke` (raw) 20/22 with the two
 known server-defect assertions failing as designed; `test:lsp-smoke:proxy`
 **22/22 PASS** — initialize, diagnostics push, hover (resolved and
 unresolvable), completion, definition, documentSymbol, semanticTokens,
 shutdown all valid, and the server exits 0 on stdin EOF.
 `test:toolchain-smoke` **could not run** on this machine (no gcc; the
 source-built `kcc` engine crashes with `0xC000014D`); it must not be run
-with CWD inside the compiler repository. CI legs on macOS/Linux are
-unverified — the Phase 14 `integration` job exists but has never run; that
-is the release-blocker for Phase 17.
+with CWD inside the compiler repository. Real-world validation, and an
+upstream Karkain LSP fix, remain open release-track items.
 
 - [x] **Phase 10 — Toolchain service seam** (`src/toolchainService.ts`): one
       `ToolchainService` interface owns every Karkain process; `child_process`
@@ -125,14 +125,14 @@ their outputs, and 13 changes the argv model that 14 asserts against.
       note records that `check`/`test`/`debug` orchestration is only covered
       where the fake can observe it. Extend `src/test/fakes/toolchainFake.ts` so
       those paths are assertable end to end rather than only argv-visible.
-- [x] **Phase 17 — Release 1.0 readiness**: **In progress / not done.** As of
-      2026-11-14 the Windows leg of the gates is green locally
-      (typecheck/lint/format:check/unit 224/224, integration 22/22, proxy
-      smoke 22/22, VSIX packaged); **macOS and Linux are unverified, and the
-      Phase 14 `integration` job has never run**, so the A-30 bar
-      ("understood cross-platform behavior", green CI) is not met. Also blocked
-      on the Marketplace publisher decision in `docs/RELEASE.md`. Do not tag,
-      release or publish without all legs green and an explicit owner decision.
+- [x] **Phase 17 — Release 1.0 readiness**: **Complete.** PR #1 merged as
+      merge commit `ceea1b80260babd43511a6f6dbc85f3e27debd0b`. CI run #13
+      (`43587837685`, all six validation and integration legs green on
+      Windows, Ubuntu and macOS). Windows local gates green (unit 224/224,
+      integration 22/22, VSIX packaged and inspected). Real-world validation
+      remains open; Marketplace publication is deliberately excluded.
+      `v1.0.0` released to GitHub Releases via `release.yml` from the `v1.0.0`
+      tag.
 - [x] **Phase 18 — Complete IDE experience (v1.0.0 product milestone)**:
       Karkain Control Center (activity bar, 7 native views: Overview, Quick
       Actions, Projects & Files, Compiler Commands, Standard Library,
