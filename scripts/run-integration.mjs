@@ -30,7 +30,10 @@ function localCandidates() {
     ];
   }
   if (process.platform === 'darwin') {
-    return ['/Applications/Visual Studio Code.app/Contents/MacOS/Electron'];
+    // VS Code ≥ 1.146 renamed the macOS main binary Electron → Code inside the
+    // same app bundle; accept either, preferring the current name.
+    const macos = '/Applications/Visual Studio Code.app/Contents/MacOS';
+    return [path.join(macos, 'Code'), path.join(macos, 'Electron')];
   }
   return ['/usr/bin/code', '/usr/share/code/code', '/snap/bin/code'];
 }
@@ -49,11 +52,49 @@ function resolveLocalEditor() {
   return localCandidates().find((candidate) => fs.existsSync(candidate));
 }
 
-const vscodeExecutablePath = resolveLocalEditor();
-if (vscodeExecutablePath) {
-  console.log(`[run-integration] using local VS Code: ${vscodeExecutablePath}`);
+// The library computes the macOS executable path as Contents/MacOS/Electron,
+// which newer (≥ 1.146.0) darwin archives no longer ship: the binary is
+// Contents/MacOS/Code. When the pinned/current build is found, prefer the
+// real binary; on any doubt return the library's candidate unchanged (the
+// runner then errors exactly as before — no silent difference in behavior).
+async function downloadWithBinaryFallback() {
+  try {
+    // Same version-inference the runner uses (latest stable satisfying
+    // engines.vscode) and the same on-disk cache, via the library's own
+    // downloader — the download is not duplicated and behaviour is identical.
+    const { downloadAndUnzipVSCode } = require('@vscode/test-electron/out/download');
+    const candidate = await downloadAndUnzipVSCode({ extensionsDevelopmentPath: repoRoot });
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+    for (const name of ['Code', 'Electron']) {
+      const p = path.join(path.dirname(candidate), name);
+      if (fs.existsSync(p)) {
+        console.log(
+          `[run-integration] VS Code bundle ships '${name}' (not '${path.basename(candidate)}'); using ${p}`,
+        );
+        return p;
+      }
+    }
+    console.log(
+      `[run-integration] downloaded editor binary not found at ${candidate}; passing it through unchanged`,
+    );
+    return candidate;
+  } catch (err) {
+    console.warn(
+      `[run-integration] pre-download did not complete (${err?.message ?? err}); letting the runner resolve it itself`,
+    );
+    return undefined; // runner performs the identical download on its own
+  }
+}
+
+const local = resolveLocalEditor();
+let vscodeExecutablePath = local;
+if (local) {
+  console.log(`[run-integration] using local VS Code: ${local}`);
 } else {
   console.log('[run-integration] no local VS Code found; downloading a pinned build');
+  vscodeExecutablePath = await downloadWithBinaryFallback();
 }
 
 await runTests({

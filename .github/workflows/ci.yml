@@ -12,9 +12,9 @@ jobs:
     # why this is a separate job from `validate`: the unit suite needs no editor
     # process and must stay fast on every push.
     #
-    # On Linux, Electron cannot start without a display, so the runner is wrapped
-    # in xvfb-run. macOS/Windows need no such wrapper, so the condition keeps the
-    # step uniform across the matrix.
+    # Linux spawns the suite under xvfb-run (Electron cannot start without a
+    # display); macOS/Windows launch it directly. Both paths run the full
+    # extension-host suite — neither skips a single test.
     strategy:
       fail-fast: false
       matrix:
@@ -33,10 +33,19 @@ jobs:
           path: '**/*.log'
           if-no-files-found: ignore
       - run: npm ci
-      # xvfb-run provides the virtual display Electron requires on Linux; the
-      # other two OSes need no wrapper, so the prefix stays empty there.
-      - name: extension-host suite
-        run: ${{ runner.os == 'Linux' && 'xvfb-run --auto-servernum --server-args=-screen 0 1024x768x24' || '' }} npm run test:integration
+      # Linux: Electron needs an X display, so the runner runs under xvfb-run.
+      # The X server arguments are passed as ONE quoted argument — splitting
+      # them made xvfb-run treat `0` as the command ("0: not found").
+      - name: extension-host suite (Linux, xvfb)
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1024x768x24" npm run test:integration
+        env:
+          # Always take the portable path in CI: a locally installed VS Code
+          # would not match the pinned build the suite is written against.
+          KARKAIN_VSCODE_DOWNLOAD: '1'
+      - name: extension-host suite (Windows/macOS)
+        if: runner.os != 'Linux'
+        run: npm run test:integration
         env:
           # Always take the portable path in CI: a locally installed VS Code
           # would not match the pinned build the suite is written against.
